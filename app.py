@@ -23,14 +23,14 @@ PLATAFORMAS_FINAIS = [
 st.markdown(r"""
 <style>
 :root{
-  --brand:#5B2CFF; --brand2:#7C4DFF; --ink:#15131B; --muted:#706B7B;
+  --brand:#F26A3D; --brand2:#FF9A76; --ink:#2B211E; --muted:#786B66; --muted:#706B7B;
   --surface:#FFFFFF; --soft:#F7F5FB; --line:#E9E5F1; --ok:#137A4D; --warn:#A66500;
 }
 html, body, [class*="css"] {font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;}
-.stApp{background:linear-gradient(180deg,#FBFAFD 0%,#F6F4FA 100%);}
+.stApp{background:linear-gradient(180deg,#FFF9F6 0%,#FFF2EC 100%);}
 .block-container{max-width:1180px;padding-top:1.6rem;padding-bottom:3rem;}
 #MainMenu, footer, header{visibility:hidden;}
-.hero{background:linear-gradient(135deg,#1D1434 0%,#33205F 58%,#5B2CFF 100%);color:white;padding:34px 36px;border-radius:24px;box-shadow:0 18px 60px rgba(43,24,89,.18);margin-bottom:18px;}
+.hero{background:linear-gradient(135deg,#E9552F 0%,#F47752 58%,#FF9A76 100%);color:white;padding:34px 36px;border-radius:24px;box-shadow:0 18px 60px rgba(43,24,89,.18);margin-bottom:18px;}
 .hero-kicker{font-size:.78rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase;opacity:.78;margin-bottom:8px;}
 .hero h1{font-size:2.15rem;line-height:1.08;margin:0 0 10px;font-weight:780;}
 .hero p{font-size:1rem;max-width:760px;opacity:.86;margin:0;line-height:1.55;}
