@@ -12,25 +12,6 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
 }
 
-
-def _launch_chromium(playwright):
-    """Launch Chromium locally or the system Chromium used by Streamlit Cloud."""
-    import os
-    candidates = [
-        os.environ.get("CHROMIUM_PATH"),
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/google-chrome",
-    ]
-    for path in candidates:
-        if path and os.path.exists(path):
-            return playwright.chromium.launch(
-                headless=True,
-                executable_path=path,
-                args=["--no-sandbox", "--disable-dev-shm-usage"]
-            )
-    return playwright.chromium.launch(headless=True)
-
 def get(url, **kwargs):
     h = dict(HEADERS)
     h.update(kwargs.pop("headers", {}) or {})
@@ -98,7 +79,7 @@ def _capturar_resposta_json_playwright(url, trecho_url):
     capturado = {"data": None, "url": None}
 
     with sync_playwright() as p:
-        browser = _launch_chromium(p)
+        browser = p.chromium.launch(headless=True)
         page = browser.new_page(
             locale="pt-BR",
             user_agent=HEADERS["User-Agent"],
@@ -810,7 +791,7 @@ def _diagnostico_final_detalhe(url, plataforma, max_produtos=8):
     }
 
     with sync_playwright() as p:
-        browser = _launch_chromium(p)
+        browser = p.chromium.launch(headless=True)
         page = browser.new_page(
             locale="pt-BR",
             viewport={"width":1440,"height":1200},
@@ -948,12 +929,6 @@ def buscar_por_url(url, usar_playwright=True):
     - preserva parsers específicos comprovados.
     """
     plataforma = detectar_plataforma(url)
-
-    plataformas_retiradas = {"MenuDino", "Menui / Menu Integrado", "MeuComércio"}
-    if plataforma in plataformas_retiradas:
-        raise ValueError(
-            f"{plataforma} foi retirada da versão final por não atingir o padrão de consistência do projeto."
-        )
 
     diag = None
     if usar_playwright:
@@ -1983,28 +1958,51 @@ def buscar_brendi(url):
                 p.get("customs") or p.get("modifierGroups") or p.get("modifier_groups") or
                 p.get("optionGroups") or p.get("option_groups") or p.get("add_ons") or []
             )
-            for g in grupos_brendi:
+            for g_idx, g in enumerate(grupos_brendi):
                 if g.get("active") is False:
                     continue
-                raw_id = str(g.get("id"))
+
+                # Brendi nem sempre envia ID para o grupo. Antes, todos os grupos
+                # sem ID viravam a chave literal "None" e acabavam fundidos no
+                # mesmo grupo (9000000), gerando opções duplicadas.
+                raw_group_id = g.get("id")
+                if raw_group_id not in (None, ""):
+                    raw_id = f"id:{raw_group_id}"
+                else:
+                    raw_id = (
+                        f"produto:{p.get('id') or 'sem-id'}:"
+                        f"grupo:{g_idx}:"
+                        f"{texto_seguro(g.get('title')).strip().lower()}"
+                    )
+
                 if raw_id not in gid_map:
                     gid_map[raw_id] = str(seq); seq += 1
                 gid = gid_map[raw_id]
                 valid = []
+                opcoes_vistas_brendi = set()
                 for o in g.get("choices", []) or []:
                     if o.get("active") is False:
                         continue
+
+                    nome_opcao = texto_seguro(o.get("title"))
+                    preco_opcao = parse_preco(o.get("extraPrice"))/100.0
+                    chave_opcao = (nome_opcao.strip().lower(), round(float(preco_opcao or 0), 6))
+                    if chave_opcao in opcoes_vistas_brendi:
+                        continue
+                    opcoes_vistas_brendi.add(chave_opcao)
+
                     valid.append(GrupoOpcao(
                         grupo_id=gid, tipo=tipo_grupo(g.get("title")),
                         grupo_nome=texto_seguro(g.get("title")),
-                        nome=texto_seguro(o.get("title")),
+                        nome=nome_opcao,
                         imagem=imagem_compativel(o.get("picture")),
-                        preco=parse_preco(o.get("extraPrice"))/100.0,
+                        preco=preco_opcao,
                         minimo=1 if g.get("required") else 0,
                         maximo=(len(g.get("choices") or []) or 1) if g.get("type")=="multiple" else 1
                     ))
                 if valid:
-                    gids.append(gid)
+                    if gid not in gids:
+                        gids.append(gid)
                     res.grupos.extend(valid)
             if not gids:
                 gids = _materializar_grupos_genericos(
@@ -2144,7 +2142,7 @@ def buscar_cardapioweb(url, diagnostico=False):
         return info
 
     with sync_playwright() as p:
-        browser = _launch_chromium(p)
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             locale="pt-BR",
             viewport={"width": 1440, "height": 1200},
@@ -3594,7 +3592,7 @@ def diagnosticar_interacoes_produtos(url, plataforma=None, max_produtos=6):
     }
 
     with sync_playwright() as p:
-        browser = _launch_chromium(p)
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             locale="pt-BR",
             viewport={"width": 1440, "height": 1200},
@@ -3854,7 +3852,7 @@ def diagnosticar_rede_universal(url, plataforma=None):
     html_final = ""
 
     with sync_playwright() as p:
-        browser = _launch_chromium(p)
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             locale="pt-BR",
             viewport={"width": 1440, "height": 1200},
@@ -4152,7 +4150,7 @@ def _dedupe_result(res):
 def render_playwright(url):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser=_launch_chromium(p)
+        browser=p.chromium.launch(headless=True)
         context=browser.new_context(
             locale="pt-BR",
             viewport={"width":1440,"height":1200},
