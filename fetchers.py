@@ -1958,39 +1958,47 @@ def buscar_brendi(url):
                 p.get("customs") or p.get("modifierGroups") or p.get("modifier_groups") or
                 p.get("optionGroups") or p.get("option_groups") or p.get("add_ons") or []
             )
-            for g_idx, g in enumerate(grupos_brendi):
+            for indice_g, g in enumerate(grupos_brendi):
                 if g.get("active") is False:
                     continue
 
-                # Brendi nem sempre envia ID para o grupo. Antes, todos os grupos
-                # sem ID viravam a chave literal "None" e acabavam fundidos no
-                # mesmo grupo (9000000), gerando opções duplicadas.
-                raw_group_id = g.get("id")
-                if raw_group_id not in (None, ""):
-                    raw_id = f"id:{raw_group_id}"
+                # O Brendi repete a definição do mesmo grupo dentro de vários
+                # produtos. Quando existe ID, ele deve representar UM único
+                # grupo na saída; não devemos inserir as mesmas opções de novo.
+                # Quando não existe ID, a chave precisa ser exclusiva do produto
+                # para não transformar todos os grupos sem ID no mesmo 9000000.
+                original_id = g.get("id")
+                if original_id not in (None, ""):
+                    raw_id = f"id:{original_id}"
                 else:
-                    raw_id = (
-                        f"produto:{p.get('id') or 'sem-id'}:"
-                        f"grupo:{g_idx}:"
-                        f"{texto_seguro(g.get('title')).strip().lower()}"
-                    )
+                    raw_id = f"produto:{p.get('id') or len(res.itens)+len(res.pizzas)+1}:grupo:{indice_g}:{g.get('title') or ''}"
 
-                if raw_id not in gid_map:
-                    gid_map[raw_id] = str(seq); seq += 1
+                grupo_ja_materializado = raw_id in gid_map
+                if not grupo_ja_materializado:
+                    gid_map[raw_id] = str(seq)
+                    seq += 1
                 gid = gid_map[raw_id]
+
+                # O vínculo produto -> grupo sempre deve existir.
+                if gid not in gids:
+                    gids.append(gid)
+
+                # Se este ID já apareceu em outro produto, suas opções já foram
+                # materializadas e não podem ser adicionadas novamente.
+                if grupo_ja_materializado:
+                    continue
+
                 valid = []
-                opcoes_vistas_brendi = set()
+                opcoes_vistas = set()
                 for o in g.get("choices", []) or []:
                     if o.get("active") is False:
                         continue
-
                     nome_opcao = texto_seguro(o.get("title"))
                     preco_opcao = parse_preco(o.get("extraPrice"))/100.0
                     chave_opcao = (nome_opcao.strip().lower(), round(float(preco_opcao or 0), 6))
-                    if chave_opcao in opcoes_vistas_brendi:
+                    if chave_opcao in opcoes_vistas:
                         continue
-                    opcoes_vistas_brendi.add(chave_opcao)
-
+                    opcoes_vistas.add(chave_opcao)
                     valid.append(GrupoOpcao(
                         grupo_id=gid, tipo=tipo_grupo(g.get("title")),
                         grupo_nome=texto_seguro(g.get("title")),
@@ -2001,9 +2009,10 @@ def buscar_brendi(url):
                         maximo=(len(g.get("choices") or []) or 1) if g.get("type")=="multiple" else 1
                     ))
                 if valid:
-                    if gid not in gids:
-                        gids.append(gid)
                     res.grupos.extend(valid)
+                else:
+                    # Sem opções válidas, não deixa vínculo para grupo vazio.
+                    gids = [x for x in gids if x != gid]
             if not gids:
                 gids = _materializar_grupos_genericos(
                     res, p, prefixo=f"brendi-{p.get('id') or len(res.itens)+1}"
