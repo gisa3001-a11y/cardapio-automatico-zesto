@@ -44,6 +44,7 @@ jobs:
           python -m py_compile preview_runner.py
           python -m py_compile real_url_validation.py
           python -m py_compile real_url_validation_parallel.py
+          python -m py_compile debug_probe_urls.py
 
       - name: Testes offline V2
         run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_pizza_rules.py test_universal_price_validation.py test_universal_export.py
@@ -52,7 +53,11 @@ jobs:
         continue-on-error: true
         run: python real_url_validation_parallel.py
 
-      - name: Publicar relatorio da bateria real
+      - name: Diagnosticar endpoints pendentes
+        continue-on-error: true
+        run: python debug_probe_urls.py
+
+      - name: Publicar relatorios da bateria real
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -60,6 +65,7 @@ jobs:
           path: |
             artifacts/real_url_report.json
             artifacts/real_url_report.md
+            artifacts/probe_endpoints.json
           if-no-files-found: warn
           retention-days: 14
 
