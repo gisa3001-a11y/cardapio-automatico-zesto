@@ -4,10 +4,11 @@ Usado quando a leitura HTTP retorna uma casca SPA, falha ou nao contem JSON
 utilizavel. Captura prioritariamente respostas XHR/fetch JSON publicas carregadas
 pela propria pagina. Nao gera XLSX e nao toca na main.
 
-V2.5:
+V2.6:
 - a mesma URL pode ser chamada varias vezes com corpos POST diferentes;
-- apos a renderizacao, tambem coleta JSON embutido no DOM (ex.: __NEXT_DATA__,
-  application/json), o que ajuda SPAs que hidratam o cardapio sem nova chamada XHR.
+- apos a renderizacao, tambem coleta JSON embutido no DOM;
+- XHR/fetch com Content-Type incorreto tambem e testado quando o corpo realmente
+  comeca com { ou [, pois algumas plataformas devolvem JSON como text/plain.
 """
 from dataclasses import dataclass
 import hashlib
@@ -29,7 +30,6 @@ IGNORAR_URL_TERMS = (
 
 
 def _chave_requisicao(resp):
-    """Distingue chamadas ao mesmo endpoint quando o POST/body muda."""
     try:
         post_data = resp.request.post_data or ""
     except Exception:
@@ -38,7 +38,6 @@ def _chave_requisicao(resp):
 
 
 def _fonte_resposta(resp) -> str:
-    """Mantem URL legivel e adiciona hash curto somente quando houver POST."""
     try:
         post_data = resp.request.post_data or ""
     except Exception:
@@ -50,7 +49,6 @@ def _fonte_resposta(resp) -> str:
 
 
 def _coletar_json_dom(page, payloads: List[Tuple[str, Any]], vistos_dom: set, max_payloads: int):
-    """Coleta somente scripts JSON publicos renderizados na propria pagina."""
     if len(payloads) >= max_payloads:
         return
     try:
@@ -74,6 +72,28 @@ def _coletar_json_dom(page, payloads: List[Tuple[str, Any]], vistos_dom: set, ma
             payloads.append((f"browser-dom:{page.url}#script={sid}", data))
         except Exception:
             continue
+
+
+def _json_da_resposta(resp, content_type: str, req_type: str):
+    """Retorna JSON real sem confiar cegamente no Content-Type."""
+    if "json" in content_type:
+        try:
+            return resp.json()
+        except Exception:
+            pass
+
+    if req_type not in ("xhr", "fetch"):
+        return None
+    try:
+        texto = (resp.text() or "").lstrip()
+    except Exception:
+        return None
+    if not texto or len(texto) > 8_000_000 or texto[0] not in "[{":
+        return None
+    try:
+        return json.loads(texto)
+    except Exception:
+        return None
 
 
 def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 120) -> BrowserProbeResult:
@@ -105,16 +125,15 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
                         return
                     req_type = (resp.request.resource_type or "").lower()
                     ct = (resp.headers.get("content-type") or "").lower()
-                    if "json" not in ct:
-                        return
-                    url_resp = resp.url
-                    low = url_resp.lower()
+                    low = resp.url.lower()
                     if req_type not in ("xhr", "fetch") and any(t in low for t in IGNORAR_URL_TERMS):
                         return
                     chave = _chave_requisicao(resp)
                     if chave in vistos:
                         return
-                    data = resp.json()
+                    data = _json_da_resposta(resp, ct, req_type)
+                    if data is None:
+                        return
                     vistos.add(chave)
                     payloads.append((_fonte_resposta(resp), data))
                 except Exception:
