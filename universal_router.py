@@ -46,6 +46,7 @@ DOMINIOS_CONHECIDOS = {
     "meucomercio.com.br": ("MeuComercio", "direto"),
     "atlasautomacao.app.br": ("Atlas Automacao", "diagnostico"),
     "hubt.com.br": ("Hubt", "diagnostico"),
+    "theozburger.com.br": ("Yooga Delivery", "diagnostico"),
 }
 
 # Parametros que normalmente sao apenas rastreamento e nao identificam o cardapio.
@@ -149,8 +150,7 @@ def ler_url_universal(url: str, usar_playwright: bool = True):
     """Retorna (resultado, deteccao) sem alterar os parsers existentes."""
     deteccao = detectar_url(url)
 
-    # Atlas/Hubt ainda estao em fase de diagnostico. Nao fingimos que existe
-    # parser especifico: a camada apenas identifica e preserva a URL limpa.
+    # Dominios em diagnostico ainda nao possuem parser especifico validado.
     if deteccao.estrategia == "diagnostico":
         return None, deteccao
 
