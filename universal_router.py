@@ -47,6 +47,8 @@ DOMINIOS_CONHECIDOS = {
     "atlasautomacao.app.br": ("Atlas Automacao", "diagnostico"),
     "hubt.com.br": ("Hubt", "diagnostico"),
     "theozburger.com.br": ("Yooga Delivery", "diagnostico"),
+    "neemo.com.br": ("Neemo", "diagnostico"),
+    "entregueja.com.br": ("EntregueJa", "diagnostico"),
 }
 
 # Parametros que normalmente sao apenas rastreamento e nao identificam o cardapio.
