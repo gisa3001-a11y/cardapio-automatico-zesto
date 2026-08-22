@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-router:
+  test-universal:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -18,13 +18,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Dependencias minimas
+      - name: Dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install requests beautifulsoup4 openpyxl pytest
 
-      - name: Compilar roteador
-        run: python -m py_compile universal_router.py
+      - name: Compilar modulos V2
+        run: |
+          python -m py_compile universal_router.py
+          python -m py_compile structure_detector.py
+          python -m py_compile generic_preview.py
+          python -m py_compile price_resolution.py
+          python -m py_compile pizza_rules.py
+          python -m py_compile universal_validation.py
+          python -m py_compile universal_export.py
+          python -m py_compile preview_runner.py
 
-      - name: Testar roteamento
-        run: python -m unittest tests/test_universal_router.py -v
+      - name: Testes V2
+        run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_pizza_rules.py test_universal_price_validation.py test_universal_export.py
