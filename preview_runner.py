@@ -1,9 +1,9 @@
 """Executa a previa generica do Leitor Universal V2.
 
 Fluxo: tenta JSON publico por HTTP; mesmo que o HTTP falhe, pode usar Playwright
-para observar respostas JSON carregadas pelo navegador. Depois normaliza
-produtos/grupos, resolve preco zero, aplica pizza e valida.
-Nao gera XLSX automaticamente.
+para observar respostas JSON carregadas pelo navegador. Payloads conhecidos
+podem passar por adaptadores estruturais antes da normalizacao generica.
+Depois resolve preco zero, aplica pizza e valida. Nao gera XLSX automaticamente.
 """
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 from generic_preview import gerar_previa_de_payload
 from pizza_rules import aplicar_regras_pizza
 from price_resolution import aplicar_resolucao_precos
+from platform_payload_adapters import adaptar_payload
 from structure_detector import HEADERS, _extrair_json_scripts
 from universal_validation import validar_previa
 
@@ -65,13 +66,14 @@ def _avaliar_opcoes(opcoes):
     melhor_fonte = ""
     for fonte, payload in opcoes:
         try:
-            previa = gerar_previa_de_payload(payload)
+            payload_avaliado, adaptador = adaptar_payload(fonte, payload)
+            previa = gerar_previa_de_payload(payload_avaliado)
         except Exception:
             continue
         chave = (len(previa.produtos), len(previa.grupos), previa.total_candidatos)
         if melhor is None or chave > melhor[0]:
             melhor = (chave, previa)
-            melhor_fonte = fonte
+            melhor_fonte = f"{fonte} [{adaptador}]" if adaptador else fonte
     return melhor, melhor_fonte
 
 
@@ -96,8 +98,6 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
     browser_aviso = ""
     http_aviso = ""
 
-    # HTTP e apenas a primeira tentativa. Falhar aqui nao deve impedir o
-    # navegador, pois algumas plataformas bloqueiam requests mas abrem no browser.
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
         status = r.status_code
@@ -146,6 +146,8 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
         avisos.append(http_aviso)
     if melhor_fonte.startswith("browser:"):
         avisos.append("Cardapio localizado por resposta JSON observada no navegador (SPA/dinamico).")
+    if "[adaptador-" in melhor_fonte:
+        avisos.append("Payload convertido por adaptador estrutural especifico antes da validacao universal.")
     if browser_aviso:
         avisos.append(browser_aviso)
 
