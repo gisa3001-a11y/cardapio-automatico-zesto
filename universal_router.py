@@ -47,6 +47,7 @@ DOMINIOS_CONHECIDOS = {
 }
 
 PARAMETROS_RASTREAMENTO = {"fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid"}
+HOSTS_NAO_CARDAPIO = {"chat.whatsapp.com", "wa.me", "api.whatsapp.com"}
 
 
 def _limpar_query(query: str) -> str:
@@ -71,6 +72,8 @@ def normalizar_url(url: str) -> str:
     host = (p.hostname or "").lower().strip(".")
     if not host:
         raise ValueError("URL de cardapio invalida.")
+    if host in HOSTS_NAO_CARDAPIO or host.endswith(".whatsapp.com"):
+        raise ValueError("Este link nao e um cardapio publico; parece ser um link do WhatsApp.")
     porta = f":{p.port}" if p.port else ""
     return urlunparse((p.scheme.lower(), host + porta, p.path or "/", "", _limpar_query(p.query), ""))
 
@@ -119,7 +122,7 @@ def diagnosticar_url_universal(url: str):
 
 
 def gerar_previa_url_universal(url: str):
-    """Tenta montar uma previa de produtos a partir de JSON publico; XLSX continua bloqueado."""
+    """Tenta montar previa de produtos; XLSX continua bloqueado."""
     deteccao = detectar_url(url)
     from preview_runner import gerar_previa_universal
     previa = gerar_previa_universal(deteccao.url_normalizada)
