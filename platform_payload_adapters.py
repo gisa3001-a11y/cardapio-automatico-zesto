@@ -100,10 +100,94 @@ def adaptar_neemo(payload: Any) -> Any:
     return {"products": produtos} if produtos else payload
 
 
+def _numero_hubt(value: Any) -> float:
+    if isinstance(value, dict):
+        for chave in ("value", "price", "amount"):
+            if chave in value:
+                return _numero_hubt(value.get(chave))
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        texto = value.strip().replace("R$", "").replace(" ", "")
+        if "," in texto:
+            texto = texto.replace(".", "").replace(",", ".")
+        try:
+            return float(texto)
+        except Exception:
+            return 0.0
+    return 0.0
+
+
+def _preco_hubt(item: Dict[str, Any]) -> float:
+    precos = item.get("prices")
+    candidatos: List[float] = []
+    if isinstance(precos, list):
+        for p in precos:
+            valor = _numero_hubt(p)
+            if valor > 0:
+                candidatos.append(valor)
+    else:
+        valor = _numero_hubt(precos)
+        if valor > 0:
+            candidatos.append(valor)
+    return min(candidatos) if candidatos else 0.0
+
+
+def _imagem_hubt(item: Dict[str, Any]) -> Any:
+    imagens = item.get("images") or []
+    if isinstance(imagens, list) and imagens:
+        primeira = imagens[0]
+        if isinstance(primeira, dict):
+            for chave in ("url", "src", "image", "original"):
+                if primeira.get(chave):
+                    return primeira.get(chave)
+        return primeira
+    return ""
+
+
+def adaptar_hubt(payload: Any) -> Any:
+    if not isinstance(payload, dict) or not isinstance(payload.get("modules"), list):
+        return payload
+    tipos = {
+        str(x.get("id")): str(x.get("name") or "")
+        for x in (payload.get("moduleTypes") or []) if isinstance(x, dict)
+    }
+    produtos = []
+    for modulo in payload.get("modules") or []:
+        if not isinstance(modulo, dict):
+            continue
+        tipo_id = str(modulo.get("_moduleType") or "")
+        tipo_nome = tipos.get(tipo_id, "")
+        if tipo_id != "3" and tipo_nome.lower() != "produtos":
+            continue
+        props = modulo.get("properties") if isinstance(modulo.get("properties"), dict) else {}
+        categoria = str(props.get("title") or "").strip()
+        for item in modulo.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            nome = str(item.get("title") or "").strip()
+            if not nome:
+                continue
+            produtos.append({
+                "id": item.get("_id"),
+                "name": nome,
+                "description": item.get("desc") or item.get("extraDesc") or "",
+                "price": _preco_hubt(item),
+                "image": _imagem_hubt(item),
+                "category": categoria,
+            })
+    return {"products": produtos} if produtos else payload
+
+
 def adaptar_payload(fonte: str, payload: Any) -> Tuple[Any, str]:
     f = (fonte or "").lower()
     if "neemo.com.br" in f and "/menu" in f and "/menu_settings" not in f:
         adaptado = adaptar_neemo(payload)
         if adaptado is not payload:
             return adaptado, "adaptador-neemo"
+    if "hassets" in f or "storage.googleapis.com" in f:
+        adaptado = adaptar_hubt(payload)
+        if adaptado is not payload:
+            return adaptado, "adaptador-hubt"
     return payload, ""
