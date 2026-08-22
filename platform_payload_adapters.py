@@ -183,8 +183,6 @@ def adaptar_hubt(payload: Any) -> Any:
             continue
         tipo_id = str(modulo.get("_moduleType") or modulo.get("moduleTypeId") or modulo.get("moduleType") or "")
         tipo_nome = tipos.get(tipo_id, "")
-        # No payload real conhecido, _moduleType == 3 identifica módulos de Produtos.
-        # Em variações antigas, o nome do tipo vem em moduleTypes.
         if tipo_id != "3" and tipo_nome.strip().lower() != "produtos":
             continue
 
@@ -213,6 +211,67 @@ def adaptar_hubt(payload: Any) -> Any:
     return {"products": produtos} if produtos else payload
 
 
+def _firestore_value(value: Any) -> Any:
+    """Converte o formato tipado da API REST do Firestore para Python simples."""
+    if not isinstance(value, dict):
+        return value
+    if "nullValue" in value:
+        return None
+    for chave in ("stringValue", "timestampValue", "referenceValue", "bytesValue"):
+        if chave in value:
+            return value.get(chave)
+    if "booleanValue" in value:
+        return bool(value.get("booleanValue"))
+    if "integerValue" in value:
+        try:
+            return int(value.get("integerValue"))
+        except Exception:
+            return value.get("integerValue")
+    if "doubleValue" in value:
+        try:
+            return float(value.get("doubleValue"))
+        except Exception:
+            return value.get("doubleValue")
+    if "geoPointValue" in value:
+        gp = value.get("geoPointValue") or {}
+        return {"latitude": gp.get("latitude"), "longitude": gp.get("longitude")}
+    if "arrayValue" in value:
+        vals = (value.get("arrayValue") or {}).get("values") or []
+        return [_firestore_value(v) for v in vals]
+    if "mapValue" in value:
+        fields = (value.get("mapValue") or {}).get("fields") or {}
+        return {str(k): _firestore_value(v) for k, v in fields.items()}
+    # Estrutura já parcialmente decodificada: preserva recursivamente.
+    return {str(k): _firestore_value(v) for k, v in value.items()}
+
+
+def adaptar_firestore_lojamenu(payload: Any) -> Any:
+    """Decodifica respostas documents:runQuery usadas pelo Loja.Menu.
+
+    Não presume onde ficam os produtos. Apenas remove os wrappers tipados do
+    Firestore para que o detector genérico consiga enxergar nome/preço/imagem e
+    estruturas de personalizações normalmente.
+    """
+    if not isinstance(payload, list):
+        return payload
+    documentos = []
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        doc = row.get("document")
+        if not isinstance(doc, dict):
+            continue
+        fields = doc.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        decoded = {str(k): _firestore_value(v) for k, v in fields.items()}
+        decoded["_firestore_document"] = doc.get("name") or ""
+        documentos.append(decoded)
+    if not documentos:
+        return payload
+    return {"documents": documentos}
+
+
 def adaptar_payload(fonte: str, payload: Any) -> Tuple[Any, str]:
     f = (fonte or "").lower()
     if "neemo.com.br" in f and "/menu" in f and "/menu_settings" not in f:
@@ -223,4 +282,8 @@ def adaptar_payload(fonte: str, payload: Any) -> Tuple[Any, str]:
         adaptado = adaptar_hubt(payload)
         if adaptado is not payload:
             return adaptado, "adaptador-hubt"
+    if "firestore.googleapis.com" in f and "webcatalogo-1" in f and "documents:runquery" in f:
+        adaptado = adaptar_firestore_lojamenu(payload)
+        if adaptado is not payload:
+            return adaptado, "adaptador-loja-menu-firestore"
     return payload, ""
