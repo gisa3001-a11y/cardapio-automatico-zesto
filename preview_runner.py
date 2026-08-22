@@ -1,8 +1,8 @@
 """Executa a previa generica do Leitor Universal V2.
 
-Fluxo: tenta JSON publico por HTTP -> se a pagina for SPA sem JSON utilizavel,
-usa Playwright opcional para observar respostas JSON carregadas pelo navegador ->
-normaliza produtos/grupos -> resolve preco zero -> aplica pizza -> valida.
+Fluxo: tenta JSON publico por HTTP; mesmo que o HTTP falhe, pode usar Playwright
+para observar respostas JSON carregadas pelo navegador. Depois normaliza
+produtos/grupos, resolve preco zero, aplica pizza e valida.
 Nao gera XLSX automaticamente.
 """
 from dataclasses import dataclass
@@ -75,13 +75,35 @@ def _avaliar_opcoes(opcoes):
     return melhor, melhor_fonte
 
 
+def _probe_browser(url: str, timeout: int):
+    try:
+        from browser_probe import coletar_json_publico
+        probe = coletar_json_publico(url, timeout_ms=max(10000, timeout * 1000))
+        melhor_browser, fonte_browser = _avaliar_opcoes(probe.payloads)
+        aviso = ""
+        if probe.erro:
+            aviso = "Fallback de navegador indisponivel/incompleto: " + probe.erro
+        return probe, melhor_browser, fonte_browser, aviso
+    except Exception as exc:
+        return None, None, "", "Fallback de navegador falhou: " + str(exc)
+
+
 def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool = True) -> ResultadoPreviaUniversal:
+    status = None
+    url_final = url
+    melhor = None
+    melhor_fonte = ""
+    browser_aviso = ""
+    http_aviso = ""
+
+    # HTTP e apenas a primeira tentativa. Falhar aqui nao deve impedir o
+    # navegador, pois algumas plataformas bloqueiam requests mas abrem no browser.
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
         status = r.status_code
+        url_final = r.url
         r.raise_for_status()
         content_type = (r.headers.get("content-type") or "").lower()
-
         opcoes = []
         if "json" in content_type:
             try:
@@ -91,83 +113,70 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
         else:
             soup = BeautifulSoup(r.text, "html.parser")
             opcoes.extend(_extrair_json_scripts(soup))
-
         melhor, melhor_fonte = _avaliar_opcoes(opcoes)
-        url_final = r.url
-        browser_aviso = ""
-
-        # Muitas plataformas modernas devolvem apenas 'Carregando...' no HTML
-        # e buscam o cardapio via XHR/fetch depois. Nesses casos observamos somente
-        # respostas JSON publicas produzidas pela propria navegacao.
-        if (melhor is None or len(melhor[1].produtos) == 0) and permitir_browser:
-            try:
-                from browser_probe import coletar_json_publico
-                probe = coletar_json_publico(r.url, timeout_ms=max(10000, timeout * 1000))
-                if probe.url_final:
-                    url_final = probe.url_final
-                melhor_browser, fonte_browser = _avaliar_opcoes(probe.payloads)
-                if melhor_browser is not None and (
-                    melhor is None or melhor_browser[0] > melhor[0]
-                ):
-                    melhor = melhor_browser
-                    melhor_fonte = fonte_browser
-                if probe.erro:
-                    browser_aviso = "Fallback de navegador indisponivel/incompleto: " + probe.erro
-            except Exception as exc:
-                browser_aviso = "Fallback de navegador falhou: " + str(exc)
-
-        if melhor is None or len(melhor[1].produtos) == 0:
-            aviso = "Nenhuma estrutura de produtos utilizavel foi localizada por HTTP"
-            if permitir_browser:
-                aviso += " nem pelo fallback de navegador"
-            aviso += "."
-            if browser_aviso:
-                aviso += " " + browser_aviso
-            return _vazio(url_final, status, melhor_fonte or "nenhuma", aviso)
-
-        previa = melhor[1]
-        data = previa.to_dict()
-        produtos_precificados, diagnosticos_precos = aplicar_resolucao_precos(data["produtos"], data["grupos"])
-        produtos, diagnosticos_pizza = aplicar_regras_pizza(produtos_precificados, data["grupos"])
-        pizzas = [d for d in diagnosticos_pizza if d.get("pizza")]
-
-        avisos = list(data["avisos"])
-        if melhor_fonte.startswith("browser:"):
-            avisos.append("Cardapio localizado por resposta JSON observada no navegador (SPA/dinamico).")
-        if browser_aviso:
-            avisos.append(browser_aviso)
-
-        resolvidos = sum(1 for d in diagnosticos_precos if d.get("resolvido"))
-        pendentes_zero = sum(1 for d in diagnosticos_precos if float(d.get("preco_original", 0) or 0) == 0 and not d.get("resolvido"))
-        if resolvidos:
-            avisos.append(f"{resolvidos} produto(s) com preco zero tiveram sugestao de preco resolvida por grupo estruturado.")
-        if pendentes_zero:
-            avisos.append(f"{pendentes_zero} produto(s) seguem com preco zero por falta de evidencia segura.")
-
-        if pizzas:
-            indefinidas = sum(1 for p in pizzas if int(p.get("metodo_preco_pizza", 0) or 0) == 0)
-            avisos.append(f"{len(pizzas)} possivel(is) pizza(s) identificada(s); validar regra de preco por sabor.")
-            if indefinidas:
-                avisos.append(f"{indefinidas} pizza(s) ficaram com metodo de preco indefinido por falta de evidencia suficiente.")
-
-        validacao = validar_previa(produtos, data["grupos"], pizzas, previa.confianca).to_dict()
-        avisos.extend(x for x in validacao.get("avisos", []) if x not in avisos)
-        if validacao.get("erros"):
-            avisos.append("Previa ainda nao elegivel para teste de exportacao: " + "; ".join(validacao["erros"][:4]))
-
-        return ResultadoPreviaUniversal(
-            url_final=url_final,
-            status_http=status,
-            fonte=melhor_fonte,
-            confianca=previa.confianca,
-            produtos=produtos,
-            grupos=data["grupos"],
-            pizzas=pizzas,
-            diagnosticos_precos=diagnosticos_precos,
-            validacao=validacao,
-            total_candidatos=previa.total_candidatos,
-            avisos=avisos,
-        )
-
     except Exception as exc:
-        return _vazio(url, None, "erro", erro=str(exc))
+        http_aviso = f"Leitura HTTP falhou ({type(exc).__name__}: {exc}); tentando navegador."
+
+    if (melhor is None or len(melhor[1].produtos) == 0) and permitir_browser:
+        probe, melhor_browser, fonte_browser, browser_aviso = _probe_browser(url_final or url, timeout)
+        if probe is not None and probe.url_final:
+            url_final = probe.url_final
+        if melhor_browser is not None and (melhor is None or melhor_browser[0] > melhor[0]):
+            melhor = melhor_browser
+            melhor_fonte = fonte_browser
+
+    if melhor is None or len(melhor[1].produtos) == 0:
+        aviso = "Nenhuma estrutura de produtos utilizavel foi localizada por HTTP"
+        if permitir_browser:
+            aviso += " nem pelo fallback de navegador"
+        aviso += "."
+        extras = [x for x in (http_aviso, browser_aviso) if x]
+        if extras:
+            aviso += " " + " ".join(extras)
+        return _vazio(url_final, status, melhor_fonte or ("erro" if http_aviso else "nenhuma"), aviso)
+
+    previa = melhor[1]
+    data = previa.to_dict()
+    produtos_precificados, diagnosticos_precos = aplicar_resolucao_precos(data["produtos"], data["grupos"])
+    produtos, diagnosticos_pizza = aplicar_regras_pizza(produtos_precificados, data["grupos"])
+    pizzas = [d for d in diagnosticos_pizza if d.get("pizza")]
+
+    avisos = list(data["avisos"])
+    if http_aviso:
+        avisos.append(http_aviso)
+    if melhor_fonte.startswith("browser:"):
+        avisos.append("Cardapio localizado por resposta JSON observada no navegador (SPA/dinamico).")
+    if browser_aviso:
+        avisos.append(browser_aviso)
+
+    resolvidos = sum(1 for d in diagnosticos_precos if d.get("resolvido"))
+    pendentes_zero = sum(1 for d in diagnosticos_precos if float(d.get("preco_original", 0) or 0) == 0 and not d.get("resolvido"))
+    if resolvidos:
+        avisos.append(f"{resolvidos} produto(s) com preco zero tiveram sugestao de preco resolvida por grupo estruturado.")
+    if pendentes_zero:
+        avisos.append(f"{pendentes_zero} produto(s) seguem com preco zero por falta de evidencia segura.")
+
+    if pizzas:
+        indefinidas = sum(1 for p in pizzas if int(p.get("metodo_preco_pizza", 0) or 0) == 0)
+        avisos.append(f"{len(pizzas)} possivel(is) pizza(s) identificada(s); validar regra de preco por sabor.")
+        if indefinidas:
+            avisos.append(f"{indefinidas} pizza(s) ficaram com metodo de preco indefinido por falta de evidencia suficiente.")
+
+    validacao = validar_previa(produtos, data["grupos"], pizzas, previa.confianca).to_dict()
+    avisos.extend(x for x in validacao.get("avisos", []) if x not in avisos)
+    if validacao.get("erros"):
+        avisos.append("Previa ainda nao elegivel para teste de exportacao: " + "; ".join(validacao["erros"][:4]))
+
+    return ResultadoPreviaUniversal(
+        url_final=url_final,
+        status_http=status,
+        fonte=melhor_fonte,
+        confianca=previa.confianca,
+        produtos=produtos,
+        grupos=data["grupos"],
+        pizzas=pizzas,
+        diagnosticos_precos=diagnosticos_precos,
+        validacao=validacao,
+        total_candidatos=previa.total_candidatos,
+        avisos=avisos,
+    )
