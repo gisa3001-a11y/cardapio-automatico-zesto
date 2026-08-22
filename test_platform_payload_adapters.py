@@ -93,3 +93,56 @@ def test_adaptador_hubt_converte_modulos_de_produtos():
     assert previa.produtos[0].nome == "Yakissoba"
     assert previa.produtos[0].preco == 32.5
     assert previa.produtos[0].categoria == "Orientais"
+
+
+def test_adaptador_lojamenu_decodifica_firestore_tipado():
+    payload = [
+        {
+            "document": {
+                "name": "projects/webcatalogo-1/databases/(default)/documents/lojas/x",
+                "fields": {
+                    "produtos": {
+                        "arrayValue": {
+                            "values": [
+                                {
+                                    "mapValue": {
+                                        "fields": {
+                                            "id": {"stringValue": "p1"},
+                                            "nome": {"stringValue": "Bombom artesanal"},
+                                            "preco": {"doubleValue": 12.5},
+                                            "imagem": {"stringValue": "https://img.exemplo/bombom.jpg"},
+                                            "categoria": {"stringValue": "Doces"},
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "personalizacoes": {
+                        "mapValue": {
+                            "fields": {
+                                "g1": {
+                                    "mapValue": {
+                                        "fields": {
+                                            "nome": {"stringValue": "Embalagem"},
+                                            "complementos": {"arrayValue": {"values": []}},
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                },
+            }
+        }
+    ]
+    adaptado, nome = adaptar_payload(
+        "browser:https://firestore.googleapis.com/v1/projects/webcatalogo-1/databases/(default)/documents:runQuery?key=x#req=abc",
+        payload,
+    )
+    assert nome == "adaptador-loja-menu-firestore"
+    previa = gerar_previa_de_payload(adaptado)
+    assert len(previa.produtos) == 1
+    assert previa.produtos[0].nome == "Bombom artesanal"
+    assert previa.produtos[0].preco == 12.5
+    assert previa.produtos[0].categoria == "Doces"
