@@ -15,6 +15,7 @@ on:
 jobs:
   test-universal:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,13 +43,14 @@ jobs:
           python -m py_compile browser_probe.py
           python -m py_compile preview_runner.py
           python -m py_compile real_url_validation.py
+          python -m py_compile real_url_validation_parallel.py
 
       - name: Testes offline V2
         run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_pizza_rules.py test_universal_price_validation.py test_universal_export.py
 
       - name: Validacao controlada de URLs reais
         continue-on-error: true
-        run: python real_url_validation.py
+        run: python real_url_validation_parallel.py
 
       - name: Publicar relatorio da bateria real
         if: always()
