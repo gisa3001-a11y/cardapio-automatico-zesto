@@ -1,9 +1,10 @@
 """Executa a previa generica do Leitor Universal V2.
 
 Fluxo: tenta JSON publico por HTTP; para excecoes conhecidas pode usar um probe
-especializado e, se ainda necessario, Playwright generico. Payloads conhecidos
-passam por adaptadores estruturais antes da normalizacao. Depois resolve preco
-zero, aplica pizza e valida. Nao gera XLSX automaticamente.
+HTTP especifico, API publica, probe especializado e, se ainda necessario,
+Playwright generico. Payloads conhecidos passam por adaptadores estruturais
+antes da normalizacao. Depois resolve preco zero, aplica pizza e valida.
+Nao gera XLSX automaticamente.
 """
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -77,6 +78,19 @@ def _avaliar_opcoes(opcoes):
     return melhor, melhor_fonte
 
 
+def _probe_http_especifico(url: str, timeout: int):
+    """Probes sem navegador para plataformas cuja estrutura ja e conhecida."""
+    try:
+        if "rapidfood.com.br" in (url or "").lower():
+            from rapidfood_public_probe import probe_rapidfood_publico
+            opcoes = probe_rapidfood_publico(url, timeout=timeout)
+            melhor, fonte = _avaliar_opcoes(opcoes)
+            return melhor, fonte, ""
+        return None, "", ""
+    except Exception as exc:
+        return None, "", "Probe HTTP especifico falhou: " + str(exc)
+
+
 def _probe_api_publica(url: str, timeout: int):
     try:
         from saipos_public_probe import probe_saipos_publico
@@ -117,6 +131,7 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
     melhor_fonte = ""
     browser_aviso = ""
     especial_aviso = ""
+    http_especifico_aviso = ""
     api_aviso = ""
     http_aviso = ""
 
@@ -140,6 +155,12 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
         http_aviso = f"Leitura HTTP falhou ({type(exc).__name__}: {exc}); tentando fallbacks."
 
     if melhor is None or len(melhor[1].produtos) == 0:
+        melhor_http, fonte_http, http_especifico_aviso = _probe_http_especifico(url_final or url, timeout)
+        if melhor_http is not None and (melhor is None or melhor_http[0] > melhor[0]):
+            melhor = melhor_http
+            melhor_fonte = fonte_http
+
+    if melhor is None or len(melhor[1].produtos) == 0:
         melhor_api, fonte_api, api_aviso = _probe_api_publica(url_final or url, timeout)
         if melhor_api is not None and (melhor is None or melhor_api[0] > melhor[0]):
             melhor = melhor_api
@@ -160,11 +181,11 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
             melhor_fonte = fonte_browser
 
     if melhor is None or len(melhor[1].produtos) == 0:
-        aviso = "Nenhuma estrutura de produtos utilizavel foi localizada por HTTP/API publica"
+        aviso = "Nenhuma estrutura de produtos utilizavel foi localizada por HTTP/probe especifico/API publica"
         if permitir_browser:
             aviso += " nem pelos fallbacks especializados/genericos de navegador"
         aviso += "."
-        extras = [x for x in (http_aviso, api_aviso, especial_aviso, browser_aviso) if x]
+        extras = [x for x in (http_aviso, http_especifico_aviso, api_aviso, especial_aviso, browser_aviso) if x]
         if extras:
             aviso += " " + " ".join(extras)
         return _vazio(url_final, status, melhor_fonte or ("erro" if http_aviso else "nenhuma"), aviso)
@@ -184,6 +205,8 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
         avisos.append("Cardapio localizado por resposta JSON observada no navegador (SPA/dinamico).")
     if "[adaptador-" in melhor_fonte:
         avisos.append("Payload convertido por adaptador estrutural especifico antes da validacao universal.")
+    if http_especifico_aviso:
+        avisos.append(http_especifico_aviso)
     if api_aviso:
         avisos.append(api_aviso)
     if especial_aviso:
