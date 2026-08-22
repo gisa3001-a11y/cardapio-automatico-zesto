@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from generic_preview import gerar_previa_de_payload
+from pizza_rules import aplicar_regras_pizza
 from structure_detector import HEADERS, _extrair_json_scripts
 
 
@@ -21,6 +22,7 @@ class ResultadoPreviaUniversal:
     confianca: str
     produtos: List[Dict[str, Any]]
     grupos: List[Dict[str, Any]]
+    pizzas: List[Dict[str, Any]]
     total_candidatos: int
     avisos: List[str]
     erro: Optional[str] = None
@@ -33,6 +35,7 @@ class ResultadoPreviaUniversal:
             "confianca": self.confianca,
             "produtos": self.produtos,
             "grupos": self.grupos,
+            "pizzas": self.pizzas,
             "total_candidatos": self.total_candidatos,
             "avisos": self.avisos,
             "erro": self.erro,
@@ -74,21 +77,33 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
                 confianca="baixa",
                 produtos=[],
                 grupos=[],
+                pizzas=[],
                 total_candidatos=0,
                 avisos=["Nenhuma estrutura JSON publica utilizavel foi localizada."],
             )
 
         previa = melhor[1]
         data = previa.to_dict()
+        produtos, diagnosticos_pizza = aplicar_regras_pizza(data["produtos"], data["grupos"])
+        pizzas = [d for d in diagnosticos_pizza if d.get("pizza")]
+
+        avisos = list(data["avisos"])
+        if pizzas:
+            indefinidas = sum(1 for p in pizzas if int(p.get("metodo_preco_pizza", 0) or 0) == 0)
+            avisos.append(f"{len(pizzas)} possivel(is) pizza(s) identificada(s); validar regra de preco por sabor.")
+            if indefinidas:
+                avisos.append(f"{indefinidas} pizza(s) ficaram com metodo de preco indefinido por falta de evidencia suficiente.")
+
         return ResultadoPreviaUniversal(
             url_final=r.url,
             status_http=status,
             fonte=melhor_fonte,
             confianca=previa.confianca,
-            produtos=data["produtos"],
+            produtos=produtos,
             grupos=data["grupos"],
+            pizzas=pizzas,
             total_candidatos=previa.total_candidatos,
-            avisos=data["avisos"],
+            avisos=avisos,
         )
 
     except Exception as exc:
@@ -99,6 +114,7 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
             confianca="baixa",
             produtos=[],
             grupos=[],
+            pizzas=[],
             total_candidatos=0,
             avisos=[],
             erro=str(exc),
