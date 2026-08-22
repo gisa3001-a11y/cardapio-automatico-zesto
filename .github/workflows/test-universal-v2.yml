@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - leitor-universal-v2
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.py"
+      - ".github/workflows/test-universal-v2.yml"
   workflow_dispatch:
 
 jobs:
