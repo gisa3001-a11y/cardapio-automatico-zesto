@@ -1,8 +1,9 @@
 """Executa a previa generica do Leitor Universal V2.
 
-Usa somente JSON publico encontrado na resposta HTTP/HTML. Nao gera XLSX.
+Fluxo: localiza JSON publico -> normaliza produtos/grupos -> resolve preco zero
+quando ha evidencia -> aplica regras de pizza -> valida tecnicamente.
+Nao gera XLSX automaticamente.
 """
-
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -11,8 +12,9 @@ from bs4 import BeautifulSoup
 
 from generic_preview import gerar_previa_de_payload
 from pizza_rules import aplicar_regras_pizza
+from price_resolution import aplicar_resolucao_precos
 from structure_detector import HEADERS, _extrair_json_scripts
-
+from universal_validation import validar_previa
 
 @dataclass
 class ResultadoPreviaUniversal:
@@ -23,6 +25,8 @@ class ResultadoPreviaUniversal:
     produtos: List[Dict[str, Any]]
     grupos: List[Dict[str, Any]]
     pizzas: List[Dict[str, Any]]
+    diagnosticos_precos: List[Dict[str, Any]]
+    validacao: Dict[str, Any]
     total_candidatos: int
     avisos: List[str]
     erro: Optional[str] = None
@@ -36,12 +40,23 @@ class ResultadoPreviaUniversal:
             "produtos": self.produtos,
             "grupos": self.grupos,
             "pizzas": self.pizzas,
+            "diagnosticos_precos": self.diagnosticos_precos,
+            "validacao": self.validacao,
             "total_candidatos": self.total_candidatos,
             "avisos": self.avisos,
-            "erro": self.erro,
+            # Mesmo se a validacao tecnica aprovar, a exportacao automatica fica
+            # bloqueada ate passar pela bateria controlada de URLs reais.
             "pode_gerar_xlsx": False,
+            "elegivel_para_teste_xlsx": bool(self.validacao.get("aprovado")),
         }
 
+def _vazio(url: str, status: Optional[int], fonte: str, aviso: str = "", erro: Optional[str] = None):
+    return ResultadoPreviaUniversal(
+        url_final=url, status_http=status, fonte=fonte, confianca="baixa",
+        produtos=[], grupos=[], pizzas=[], diagnosticos_precos=[],
+        validacao={"aprovado": False, "score": 0, "erros": [aviso] if aviso else [], "avisos": [], "metricas": {}, "pode_gerar_xlsx": False},
+        total_candidatos=0, avisos=[aviso] if aviso else [], erro=erro,
+    )
 
 def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniversal:
     try:
@@ -70,29 +85,33 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
                 melhor_fonte = fonte
 
         if melhor is None:
-            return ResultadoPreviaUniversal(
-                url_final=r.url,
-                status_http=status,
-                fonte="nenhuma",
-                confianca="baixa",
-                produtos=[],
-                grupos=[],
-                pizzas=[],
-                total_candidatos=0,
-                avisos=["Nenhuma estrutura JSON publica utilizavel foi localizada."],
-            )
+            return _vazio(r.url, status, "nenhuma", "Nenhuma estrutura JSON publica utilizavel foi localizada.")
 
         previa = melhor[1]
         data = previa.to_dict()
-        produtos, diagnosticos_pizza = aplicar_regras_pizza(data["produtos"], data["grupos"])
+
+        produtos_precificados, diagnosticos_precos = aplicar_resolucao_precos(data["produtos"], data["grupos"])
+        produtos, diagnosticos_pizza = aplicar_regras_pizza(produtos_precificados, data["grupos"])
         pizzas = [d for d in diagnosticos_pizza if d.get("pizza")]
 
         avisos = list(data["avisos"])
+        resolvidos = sum(1 for d in diagnosticos_precos if d.get("resolvido"))
+        pendentes_zero = sum(1 for d in diagnosticos_precos if float(d.get("preco_original", 0) or 0) == 0 and not d.get("resolvido"))
+        if resolvidos:
+            avisos.append(f"{resolvidos} produto(s) com preco zero tiveram sugestao de preco resolvida por grupo estruturado.")
+        if pendentes_zero:
+            avisos.append(f"{pendentes_zero} produto(s) seguem com preco zero por falta de evidencia segura.")
+
         if pizzas:
             indefinidas = sum(1 for p in pizzas if int(p.get("metodo_preco_pizza", 0) or 0) == 0)
             avisos.append(f"{len(pizzas)} possivel(is) pizza(s) identificada(s); validar regra de preco por sabor.")
             if indefinidas:
                 avisos.append(f"{indefinidas} pizza(s) ficaram com metodo de preco indefinido por falta de evidencia suficiente.")
+
+        validacao = validar_previa(produtos, data["grupos"], pizzas, previa.confianca).to_dict()
+        avisos.extend(x for x in validacao.get("avisos", []) if x not in avisos)
+        if validacao.get("erros"):
+            avisos.append("Previa ainda nao elegivel para teste de exportacao: " + "; ".join(validacao["erros"][:4]))
 
         return ResultadoPreviaUniversal(
             url_final=r.url,
@@ -102,20 +121,11 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
             produtos=produtos,
             grupos=data["grupos"],
             pizzas=pizzas,
+            diagnosticos_precos=diagnosticos_precos,
+            validacao=validacao,
             total_candidatos=previa.total_candidatos,
             avisos=avisos,
         )
 
     except Exception as exc:
-        return ResultadoPreviaUniversal(
-            url_final=url,
-            status_http=None,
-            fonte="erro",
-            confianca="baixa",
-            produtos=[],
-            grupos=[],
-            pizzas=[],
-            total_candidatos=0,
-            avisos=[],
-            erro=str(exc),
-        )
+        return _vazio(url, None, "erro", erro=str(exc))
