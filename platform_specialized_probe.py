@@ -64,12 +64,6 @@ def _json_frames(texto: str) -> List[Any]:
 
 
 def _coletar_documentos_firestore(value: Any, out: List[Dict[str, Any]], depth: int = 0):
-    """Coleta documentos Firestore sem duplicar o mesmo documentChange.
-
-    Quando um objeto documentChange contém document, o documento é materializado
-    uma única vez e a recursão não entra novamente nos wrappers já consumidos.
-    A deduplicação final por nome de documento continua no probe de rede.
-    """
     if depth > 15 or len(out) >= 600:
         return
     if isinstance(value, dict):
@@ -97,7 +91,6 @@ def _coletar_documentos_firestore(value: Any, out: List[Dict[str, Any]], depth: 
 
 
 def probe_lojamenu_firestore(url: str, timeout_ms: int = 35000) -> List[Tuple[str, Any]]:
-    """Observa somente respostas publicas do Firestore carregadas pelo Loja.Menu."""
     if "loja.menu" not in (url or "").lower():
         return []
     try:
@@ -144,50 +137,74 @@ def probe_lojamenu_firestore(url: str, timeout_ms: int = 35000) -> List[Tuple[st
     return [("specialized:loja-menu-firestore-listen", {"documents": documentos})] if documentos else []
 
 
-def probe_rapidfood_dom(url: str, timeout_ms: int = 30000) -> List[Tuple[str, Any]]:
-    """Le cards server-renderizados do RapidFood sem clicar nem enviar dados."""
-    if "rapidfood.com.br" not in (url or "").lower():
-        return []
+def _probe_dom_precos(url: str, label: str, min_items: int = 5, timeout_ms: int = 30000) -> List[Tuple[str, Any]]:
+    """Extrai cards visiveis com nome+preco, com filtros fortes contra UI/carrinho."""
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
         return []
-
     produtos = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page(locale="pt-BR", viewport={"width": 1440, "height": 1200})
+            page = browser.new_page(
+                locale="pt-BR",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
+                viewport={"width": 1440, "height": 1200},
+            )
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            page.wait_for_timeout(1200)
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+            page.wait_for_timeout(1800)
+            try:
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(900)
+            except Exception:
+                pass
             produtos = page.evaluate(
                 """
                 () => {
-                  const money = /R\\$\\s*([0-9]{1,4}(?:[.,][0-9]{2})?)/i;
-                  const bad = /^(?:total|subtotal|frete|taxa|carrinho|checkout|pedido|entrega|retirada)$/i;
-                  const all = Array.from(document.querySelectorAll('body *')).slice(0, 9000);
+                  const money = /R\\$\\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/i;
+                  const bad = /^(?:total|subtotal|frete|taxa(?: de)? entrega|carrinho|checkout|pedido|entrega|retirada|cupom|desconto|finalizar|continuar|buscar|pesquisar|entrar|login)$/i;
+                  const selectors = [
+                    '[class*="product" i]','[class*="produto" i]','[class*="item" i]',
+                    '[class*="card" i]','article','li','mat-card','ion-card'
+                  ];
+                  const all = Array.from(document.querySelectorAll(selectors.join(','))).slice(0, 5000);
                   const out = [], seen = new Set();
                   for (const el of all) {
-                    if (el.children.length > 14) continue;
-                    const text = (el.innerText || '').trim();
-                    if (!text || text.length > 550 || !money.test(text)) continue;
-                    const rect = el.getBoundingClientRect();
-                    if (rect.width < 80 || rect.height < 25) continue;
-                    const lines = (el.innerText || '').split(/\\n+/).map(x => x.replace(/\\s+/g,' ').trim()).filter(Boolean);
-                    if (lines.length < 2 || lines.length > 12) continue;
+                    const style = getComputedStyle(el), rect = el.getBoundingClientRect();
+                    if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 70 || rect.height < 24) continue;
+                    const text = (el.innerText || '').replace(/\\u00a0/g,' ').trim();
+                    if (!text || text.length > 900) continue;
                     const pm = text.match(money); if (!pm) continue;
                     const price = Number(pm[1].replace('.', '').replace(',', '.'));
                     if (!Number.isFinite(price) || price <= 0 || price > 5000) continue;
-                    let name = lines.find(x => !money.test(x) && x.length >= 3 && x.length <= 140 && !bad.test(x)) || '';
-                    if (!name) continue;
-                    name = name.replace(/\\s+/g,' ').trim();
+                    const preferred = el.querySelector('h1,h2,h3,h4,h5,h6,[class*="name" i],[class*="nome" i],[class*="title" i],[class*="titulo" i]');
+                    let name = preferred ? (preferred.innerText || '').replace(/\\s+/g,' ').trim() : '';
+                    if (!name) {
+                      const lines = (el.innerText || '').split(/\\n+/).map(x=>x.replace(/\\s+/g,' ').trim()).filter(Boolean);
+                      name = lines.find(x => !money.test(x) && x.length >= 3 && x.length <= 160 && !bad.test(x)) || '';
+                    }
+                    name = name.replace(/R\\$.*$/i,'').trim();
+                    if (!name || name.length < 3 || name.length > 160 || bad.test(name)) continue;
                     const key = name.toLowerCase() + '|' + price.toFixed(2);
                     if (seen.has(key)) continue;
+                    let image = '';
                     const img = el.querySelector('img');
-                    let image = img ? (img.currentSrc || img.src || '') : '';
+                    if (img) image = img.currentSrc || img.src || '';
                     if (image && !/^https?:\\/\\//i.test(image)) image = '';
-                    seen.add(key); out.push({name, price, image, category:''});
-                    if (out.length >= 250) break;
+                    let category = '';
+                    const section = el.closest('section,[class*="category" i],[class*="categoria" i],[class*="section" i],[class*="secao" i]');
+                    if (section) {
+                      const h = section.querySelector('h1,h2,h3,h4,[class*="category" i],[class*="categoria" i]');
+                      if (h && h !== el) category = (h.innerText || '').replace(/\\s+/g,' ').trim().slice(0,160);
+                    }
+                    seen.add(key);
+                    out.push({name, price, image, category});
+                    if (out.length >= 350) break;
                   }
                   return out;
                 }
@@ -196,9 +213,15 @@ def probe_rapidfood_dom(url: str, timeout_ms: int = 30000) -> List[Tuple[str, An
             browser.close()
     except Exception:
         return []
+    if not isinstance(produtos, list) or len(produtos) < min_items:
+        return []
+    return [(f"specialized:{label}-dom", {"products": produtos})]
 
-    # O cardapio de teste conhecido exibe dezenas de precos; exigir 5 reduz falsos positivos.
-    return [("specialized:rapidfood-dom", {"products": produtos})] if isinstance(produtos, list) and len(produtos) >= 5 else []
+
+def probe_rapidfood_dom(url: str, timeout_ms: int = 30000) -> List[Tuple[str, Any]]:
+    if "rapidfood.com.br" not in (url or "").lower():
+        return []
+    return _probe_dom_precos(url, "rapidfood", 5, timeout_ms)
 
 
 def probe_especializado(url: str, timeout_ms: int = 35000) -> List[Tuple[str, Any]]:
@@ -207,4 +230,19 @@ def probe_especializado(url: str, timeout_ms: int = 35000) -> List[Tuple[str, An
         return probe_lojamenu_firestore(url, timeout_ms)
     if "rapidfood.com.br" in low:
         return probe_rapidfood_dom(url, timeout_ms)
+    if "saipos.com" in low:
+        try:
+            from saipos_public_probe import probe_saipos_publico
+            api = probe_saipos_publico(url, timeout=max(10, int(timeout_ms / 1000)))
+            if api:
+                return api
+        except Exception:
+            pass
+        return _probe_dom_precos(url, "saipos", 5, timeout_ms)
+    if "menudino.com" in low:
+        return _probe_dom_precos(url, "menudino", 5, timeout_ms)
+    if "ola.click" in low:
+        return _probe_dom_precos(url, "ola-click", 5, timeout_ms)
+    if "atlasautomacao.app.br" in low:
+        return _probe_dom_precos(url, "atlas", 5, timeout_ms)
     return []
