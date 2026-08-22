@@ -79,9 +79,9 @@ def _normalizar(produtos: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
     """Fallback dirigido ao DOM real da RapidFood.
 
-    O mapa de rede mostrou que as fotos de produto usam /dashboard/uploads/produtos/.
-    Partimos dessas imagens e subimos no DOM ate achar um bloco pequeno contendo
-    preco. Isso e mais preciso que procurar qualquer div/card da pagina.
+    O mapa de rede confirma fotos em /dashboard/uploads/produtos/. A plataforma
+    pode usa-las tanto em <img> quanto em background-image; por isso o probe
+    considera os dois formatos e faz scroll progressivo antes de coletar cards.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -101,53 +101,87 @@ def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
                 page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
                 pass
-            page.wait_for_timeout(1800)
+
+            # Carrega cards lazy sem depender de um unico salto para o rodape.
+            for frac in (0.20, 0.40, 0.60, 0.80, 1.00):
+                try:
+                    page.evaluate(f"window.scrollTo(0, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) * {frac})")
+                    page.wait_for_timeout(450)
+                except Exception:
+                    pass
+            page.wait_for_timeout(900)
 
             produtos = page.evaluate(
                 """
                 () => {
-                  const money = /R\\$\\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/i;
-                  const imgs = Array.from(document.querySelectorAll('img')).filter(img => {
-                    const s = (img.currentSrc || img.src || '').toLowerCase();
+                  const money = /R\$\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/i;
+                  const isProductUrl = s => {
+                    s = (s || '').toLowerCase();
                     return s.includes('/dashboard/uploads/produtos/') || s.includes('/uploads/produtos/');
-                  });
+                  };
+                  const imageUrl = el => {
+                    if (!el) return '';
+                    if (el.tagName === 'IMG') {
+                      const s = el.currentSrc || el.src || '';
+                      return isProductUrl(s) ? s : '';
+                    }
+                    const bg = getComputedStyle(el).backgroundImage || '';
+                    const m = bg.match(/url\(["']?([^"')]+)["']?\)/i);
+                    return m && isProductUrl(m[1]) ? m[1] : '';
+                  };
+
+                  const anchors = [];
+                  for (const el of Array.from(document.querySelectorAll('img,[style],div,span,a,button'))) {
+                    const src = imageUrl(el);
+                    if (src) anchors.push({el, src});
+                    if (anchors.length >= 500) break;
+                  }
+
                   const out = [], seen = new Set();
                   let seq = 1;
-                  for (const img of imgs) {
-                    let card = img;
+                  const badName = /^(?:adicionar|comprar|ver mais|detalhes|indisponivel|esgotado|carrinho|pedido)$/i;
+
+                  for (const anchor of anchors) {
+                    let card = anchor.el;
                     let escolhido = null;
-                    for (let i=0; i<9 && card; i++, card=card.parentElement) {
-                      const txt = (card.innerText || '').replace(/\\u00a0/g,' ').trim();
-                      if (txt && txt.length <= 1400 && money.test(txt)) { escolhido = card; break; }
+                    for (let i = 0; i < 11 && card; i++, card = card.parentElement) {
+                      const txt = (card.innerText || '').replace(/\u00a0/g, ' ').trim();
+                      if (txt && txt.length <= 1800 && money.test(txt)) {
+                        escolhido = card;
+                        break;
+                      }
                     }
                     if (!escolhido) continue;
-                    const text = (escolhido.innerText || '').replace(/\\u00a0/g,' ').trim();
-                    const pm = text.match(money); if (!pm) continue;
-                    const price = Number(pm[1].replace('.', '').replace(',', '.'));
+
+                    const text = (escolhido.innerText || '').replace(/\u00a0/g, ' ').trim();
+                    const prices = Array.from(text.matchAll(/R\$\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/ig));
+                    if (!prices.length) continue;
+                    const raw = prices[prices.length - 1][1];
+                    const price = Number(raw.replace(/\./g, '').replace(',', '.'));
                     if (!Number.isFinite(price) || price <= 0 || price > 5000) continue;
 
                     const titleEl = escolhido.querySelector('h1,h2,h3,h4,h5,h6,[class*="name" i],[class*="nome" i],[class*="title" i],[class*="titulo" i]');
-                    let name = titleEl ? (titleEl.innerText || '').replace(/\\s+/g,' ').trim() : '';
-                    if (!name) {
-                      const lines = text.split(/\\n+/).map(x=>x.replace(/\\s+/g,' ').trim()).filter(Boolean);
-                      name = lines.find(x => !money.test(x) && x.length >= 3 && x.length <= 160) || '';
+                    let name = titleEl ? (titleEl.innerText || '').replace(/\s+/g, ' ').trim() : '';
+                    if (!name || money.test(name) || badName.test(name)) {
+                      const lines = text.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+                      name = lines.find(x => !money.test(x) && x.length >= 3 && x.length <= 160 && !badName.test(x)) || '';
                     }
-                    name = name.replace(/R\\$.*$/i,'').trim();
-                    if (!name || name.length < 3 || name.length > 160) continue;
+                    name = name.replace(/R\$.*$/i, '').trim();
+                    if (!name || name.length < 3 || name.length > 160 || badName.test(name)) continue;
 
                     const key = name.toLowerCase() + '|' + price.toFixed(2);
                     if (seen.has(key)) continue;
                     seen.add(key);
 
                     let category = '';
-                    let prev = escolhido.previousElementSibling;
-                    for (let j=0; j<8 && prev && !category; j++, prev=prev.previousElementSibling) {
-                      const h = prev.matches('h1,h2,h3,h4,h5,h6') ? prev : prev.querySelector?.('h1,h2,h3,h4,h5,h6');
-                      const t = h ? (h.innerText || '').replace(/\\s+/g,' ').trim() : '';
-                      if (t && !money.test(t) && t.length <= 120) category = t;
+                    let section = escolhido.closest('section,[class*="category" i],[class*="categoria" i],[class*="section" i],[class*="secao" i]');
+                    if (section) {
+                      const h = section.querySelector('h1,h2,h3,h4,h5,h6');
+                      const t = h ? (h.innerText || '').replace(/\s+/g, ' ').trim() : '';
+                      if (t && !money.test(t) && t.length <= 120 && t.toLowerCase() !== name.toLowerCase()) category = t;
                     }
-                    const image = img.currentSrc || img.src || '';
-                    out.push({id: 'rf-dom-' + (seq++), name, price, image, category});
+
+                    out.push({id: 'rf-dom-' + (seq++), name, price, image: anchor.src, category});
                     if (out.length >= 250) break;
                   }
                   return out;
