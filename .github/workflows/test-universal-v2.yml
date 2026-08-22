@@ -36,6 +36,7 @@ jobs:
           python -m py_compile universal_router.py
           python -m py_compile structure_detector.py
           python -m py_compile generic_preview.py
+          python -m py_compile platform_payload_adapters.py
           python -m py_compile price_resolution.py
           python -m py_compile pizza_rules.py
           python -m py_compile universal_validation.py
@@ -48,7 +49,7 @@ jobs:
           python -m py_compile universal_readiness.py
 
       - name: Testes offline V2
-        run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_pizza_rules.py test_universal_price_validation.py test_universal_export.py
+        run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_platform_payload_adapters.py test_pizza_rules.py test_universal_price_validation.py test_universal_export.py
 
       - name: Diagnostico profundo dos endpoints pendentes
         continue-on-error: true
