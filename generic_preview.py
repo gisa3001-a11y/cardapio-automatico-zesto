@@ -3,8 +3,8 @@
 Transforma estruturas JSON com evidencias fortes em uma previa normalizada.
 Nao gera XLSX e nao substitui os parsers oficiais.
 
-V2.2: inclui extracao conservadora de grupos/adicionais, minimo/maximo,
-precos das opcoes e vinculo do grupo ao produto.
+V2.3: inclui extracao conservadora de grupos/adicionais e evita que opcoes
+internas (ex.: Bacon, Queijo) sejam promovidas a produtos principais.
 """
 
 from dataclasses import dataclass, asdict
@@ -155,20 +155,40 @@ def _score_produto(obj: Dict[str, Any], path: str = "") -> Tuple[int, List[str]]
     return score, sinais
 
 
-def _walk(value: Any, path: str = "$", out: Optional[List[Dict[str, Any]]] = None, limite: int = 400):
-    if out is None: out = []
-    if len(out) >= limite: return out
+GROUP_KEY_SET = {_norm_key(k) for k in GROUP_KEYS}
+
+
+def _walk(
+    value: Any,
+    path: str = "$",
+    out: Optional[List[Dict[str, Any]]] = None,
+    limite: int = 400,
+    dentro_de_grupo: bool = False,
+):
+    """Percorre o JSON sem promover opcoes de adicionais a produtos principais."""
+    if out is None:
+        out = []
+    if len(out) >= limite:
+        return out
+
     if isinstance(value, dict):
-        score, sinais = _score_produto(value, path)
-        if score >= 6:
-            out.append({"path": path, "score": score, "sinais": sinais, "obj": value})
+        if not dentro_de_grupo:
+            score, sinais = _score_produto(value, path)
+            if score >= 6:
+                out.append({"path": path, "score": score, "sinais": sinais, "obj": value})
+
         for k, v in list(value.items())[:180]:
-            _walk(v, f"{path}.{k}", out, limite)
-            if len(out) >= limite: break
+            nk = _norm_key(k)
+            filho_em_grupo = dentro_de_grupo or nk in GROUP_KEY_SET
+            _walk(v, f"{path}.{k}", out, limite, filho_em_grupo)
+            if len(out) >= limite:
+                break
+
     elif isinstance(value, list):
         for i, v in enumerate(value[:250]):
-            _walk(v, f"{path}[{i}]", out, limite)
-            if len(out) >= limite: break
+            _walk(v, f"{path}[{i}]", out, limite, dentro_de_grupo)
+            if len(out) >= limite:
+                break
     return out
 
 
@@ -189,10 +209,8 @@ def _extrair_lista_grupos(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
     if isinstance(valor, list):
         return [g for g in valor if isinstance(g, dict)]
     if isinstance(valor, dict):
-        # pode ser um grupo unico ou um wrapper com lista interna
         interna = _lookup(valor, GROUP_KEYS + OPTION_LIST_KEYS)
         if isinstance(interna, list) and all(isinstance(x, dict) for x in interna):
-            # se cada filho parece grupo (tem lista de opcoes), usa os filhos; senao o wrapper e o grupo
             if any(isinstance(_lookup(x, OPTION_LIST_KEYS), list) for x in interna):
                 return interna
         return [valor]
