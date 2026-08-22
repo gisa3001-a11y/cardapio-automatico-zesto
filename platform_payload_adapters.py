@@ -120,17 +120,20 @@ def _numero_hubt(value: Any) -> float:
 
 
 def _preco_hubt(item: Dict[str, Any]) -> float:
-    precos = item.get("prices")
     candidatos: List[float] = []
-    if isinstance(precos, list):
-        for p in precos:
-            valor = _numero_hubt(p)
+    for chave in ("prices", "price", "value", "amount"):
+        if chave not in item:
+            continue
+        raw = item.get(chave)
+        if isinstance(raw, list):
+            for p in raw:
+                valor = _numero_hubt(p)
+                if valor > 0:
+                    candidatos.append(valor)
+        else:
+            valor = _numero_hubt(raw)
             if valor > 0:
                 candidatos.append(valor)
-    else:
-        valor = _numero_hubt(precos)
-        if valor > 0:
-            candidatos.append(valor)
     return min(candidatos) if candidatos else 0.0
 
 
@@ -143,36 +146,66 @@ def _imagem_hubt(item: Dict[str, Any]) -> Any:
                 if primeira.get(chave):
                     return primeira.get(chave)
         return primeira
-    return ""
+    direta = item.get("image") or item.get("imageUrl") or item.get("photo") or ""
+    if isinstance(direta, dict):
+        for chave in ("url", "src", "original"):
+            if direta.get(chave):
+                return direta.get(chave)
+    return direta
+
+
+def _tipos_hubt(raw: Any) -> Dict[str, str]:
+    """Aceita tanto o formato real (lista) quanto variações antigas/em cache (dict)."""
+    tipos: Dict[str, str] = {}
+    if isinstance(raw, list):
+        for obj in raw:
+            if isinstance(obj, dict):
+                ident = obj.get("id") or obj.get("_id")
+                if ident is not None:
+                    tipos[str(ident)] = str(obj.get("name") or obj.get("title") or "")
+    elif isinstance(raw, dict):
+        for ident, obj in raw.items():
+            if isinstance(obj, dict):
+                tipos[str(ident)] = str(obj.get("name") or obj.get("title") or "")
+            else:
+                tipos[str(ident)] = str(obj or "")
+    return tipos
 
 
 def adaptar_hubt(payload: Any) -> Any:
     if not isinstance(payload, dict) or not isinstance(payload.get("modules"), list):
         return payload
-    tipos = {
-        str(x.get("id")): str(x.get("name") or "")
-        for x in (payload.get("moduleTypes") or []) if isinstance(x, dict)
-    }
+
+    tipos = _tipos_hubt(payload.get("moduleTypes"))
     produtos = []
     for modulo in payload.get("modules") or []:
         if not isinstance(modulo, dict):
             continue
-        tipo_id = str(modulo.get("_moduleType") or "")
+        tipo_id = str(modulo.get("_moduleType") or modulo.get("moduleTypeId") or modulo.get("moduleType") or "")
         tipo_nome = tipos.get(tipo_id, "")
-        if tipo_id != "3" and tipo_nome.lower() != "produtos":
+        # No payload real conhecido, _moduleType == 3 identifica módulos de Produtos.
+        # Em variações antigas, o nome do tipo vem em moduleTypes.
+        if tipo_id != "3" and tipo_nome.strip().lower() != "produtos":
             continue
+
         props = modulo.get("properties") if isinstance(modulo.get("properties"), dict) else {}
-        categoria = str(props.get("title") or "").strip()
+        categoria = str(
+            props.get("title")
+            or modulo.get("title")
+            or modulo.get("name")
+            or ""
+        ).strip()
+
         for item in modulo.get("items") or []:
             if not isinstance(item, dict):
                 continue
-            nome = str(item.get("title") or "").strip()
+            nome = str(item.get("title") or item.get("name") or "").strip()
             if not nome:
                 continue
             produtos.append({
-                "id": item.get("_id"),
+                "id": item.get("_id") or item.get("id"),
                 "name": nome,
-                "description": item.get("desc") or item.get("extraDesc") or "",
+                "description": item.get("desc") or item.get("extraDesc") or item.get("description") or "",
                 "price": _preco_hubt(item),
                 "image": _imagem_hubt(item),
                 "category": categoria,
