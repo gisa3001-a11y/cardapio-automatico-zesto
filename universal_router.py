@@ -1,20 +1,10 @@
 """Leitor Universal V2 — roteador isolado e seguro.
 
-Esta camada NAO substitui os parsers atuais. Ela apenas:
-1) normaliza a URL;
-2) remove parametros de rastreamento conhecidos;
-3) identifica a plataforma por dominio/subdominio;
-4) escolhe a estrategia de leitura mais adequada;
-5) delega ao buscar_por_url ja existente em fetchers.py;
-6) quando necessario, aciona o detector estrutural sem gerar XLSX automaticamente.
-
-A main oficial nao usa este arquivo enquanto a V2 estiver em testes.
+Nao substitui parsers atuais nem gera XLSX de estrutura desconhecida sem validacao.
 """
-
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
-
 
 @dataclass(frozen=True)
 class DeteccaoURL:
@@ -25,7 +15,6 @@ class DeteccaoURL:
     confianca: str
     estrategia: str
     motivo: str
-
 
 DOMINIOS_CONHECIDOS = {
     "anota.ai": ("Anota AI", "playwright-prioritario"),
@@ -54,123 +43,58 @@ DOMINIOS_CONHECIDOS = {
     "loja.menu": ("Loja.Menu", "diagnostico"),
     "lapizzaiola.com.br": ("Dominio proprio", "diagnostico"),
 }
+PARAMETROS_RASTREAMENTO = {"fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid"}
 
-PARAMETROS_RASTREAMENTO = {
-    "fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid",
-}
-
-
-def _limpar_query(query: str) -> str:
-    if not query:
-        return ""
-    pares = []
-    for chave, valor in parse_qsl(query, keep_blank_values=True):
-        chave_lower = chave.lower()
-        if chave_lower in PARAMETROS_RASTREAMENTO or chave_lower.startswith("utm_"):
+def _limpar_query(query):
+    pares=[]
+    for chave, valor in parse_qsl(query or "", keep_blank_values=True):
+        c=chave.lower()
+        if c in PARAMETROS_RASTREAMENTO or c.startswith("utm_"):
             continue
         pares.append((chave, valor))
     return urlencode(pares, doseq=True)
 
+def normalizar_url(url):
+    valor=(url or "").strip()
+    if not valor: raise ValueError("Informe a URL do cardapio.")
+    if "://" not in valor: valor="https://"+valor
+    p=urlparse(valor)
+    if p.scheme.lower() not in ("http","https") or not p.netloc: raise ValueError("URL de cardapio invalida.")
+    host=(p.hostname or "").lower().strip(".")
+    if not host: raise ValueError("URL de cardapio invalida.")
+    porta=f":{p.port}" if p.port else ""
+    return urlunparse((p.scheme.lower(),host+porta,p.path or "/","",_limpar_query(p.query),""))
 
-def normalizar_url(url: str) -> str:
-    valor = (url or "").strip()
-    if not valor:
-        raise ValueError("Informe a URL do cardapio.")
-    if "://" not in valor:
-        valor = "https://" + valor
-    p = urlparse(valor)
-    if p.scheme.lower() not in ("http", "https") or not p.netloc:
-        raise ValueError("URL de cardapio invalida.")
-    host = (p.hostname or "").lower().strip(".")
-    if not host:
-        raise ValueError("URL de cardapio invalida.")
-    porta = f":{p.port}" if p.port else ""
-    caminho = p.path or "/"
-    query = _limpar_query(p.query)
-    return urlunparse((p.scheme.lower(), host + porta, caminho, "", query, ""))
+def _dominio_corresponde(host, base): return host == base or host.endswith("."+base)
 
+def _detectar_por_dominio(url):
+    host=(urlparse(url).hostname or "").lower()
+    for base,(plataforma,estrategia) in DOMINIOS_CONHECIDOS.items():
+        if _dominio_corresponde(host,base): return plataforma,estrategia,base
+    return None,None,None
 
-def _dominio_corresponde(host: str, dominio_base: str) -> bool:
-    return host == dominio_base or host.endswith("." + dominio_base)
-
-
-def _detectar_por_dominio(url_normalizada: str):
-    host = (urlparse(url_normalizada).hostname or "").lower()
-    for dominio_base, (plataforma, estrategia) in DOMINIOS_CONHECIDOS.items():
-        if _dominio_corresponde(host, dominio_base):
-            return plataforma, estrategia, dominio_base
-    return None, None, None
-
-
-def detectar_url(url: str) -> DeteccaoURL:
-    normalizada = normalizar_url(url)
-    plataforma, estrategia, dominio_base = _detectar_por_dominio(normalizada)
+def detectar_url(url):
+    normalizada=normalizar_url(url)
+    plataforma,estrategia,base=_detectar_por_dominio(normalizada)
     if plataforma:
-        confianca = "alta" if estrategia != "diagnostico" else "dominio-confirmado"
-        return DeteccaoURL(
-            url_original=url,
-            url_normalizada=normalizada,
-            plataforma=plataforma,
-            metodo="dominio",
-            confianca=confianca,
-            estrategia=estrategia,
-            motivo=f"Dominio reconhecido: {dominio_base}",
-        )
-
+        return DeteccaoURL(url,normalizada,plataforma,"dominio","alta" if estrategia!="diagnostico" else "dominio-confirmado",estrategia,f"Dominio reconhecido: {base}")
     from fetchers import detectar_plataforma
-    plataforma_existente = detectar_plataforma(normalizada)
-    if plataforma_existente:
-        return DeteccaoURL(
-            url_original=url,
-            url_normalizada=normalizada,
-            plataforma=plataforma_existente,
-            metodo="detector-existente",
-            confianca="alta",
-            estrategia="auto",
-            motivo="Reconhecido pelo detector atual do projeto",
-        )
+    existente=detectar_plataforma(normalizada)
+    if existente:
+        return DeteccaoURL(url,normalizada,existente,"detector-existente","alta","auto","Reconhecido pelo detector atual do projeto")
+    return DeteccaoURL(url,normalizada,None,"fallback-universal","a-confirmar","diagnostico","Dominio ainda nao cadastrado; encaminhar para diagnostico universal")
 
-    return DeteccaoURL(
-        url_original=url,
-        url_normalizada=normalizada,
-        plataforma=None,
-        metodo="fallback-universal",
-        confianca="a-confirmar",
-        estrategia="diagnostico",
-        motivo="Dominio ainda nao cadastrado; encaminhar para diagnostico universal",
-    )
+def diagnosticar_url_universal(url):
+    deteccao=detectar_url(url)
+    from structural_detector import analisar_estrutura
+    return deteccao, analisar_estrutura(deteccao.url_normalizada)
 
-
-def diagnosticar_url_universal(url: str):
-    """Executa a nova analise estrutural sem alterar parsers nem gerar planilha."""
-    deteccao = detectar_url(url)
-    from structure_detector import diagnosticar_estrutura
-    diagnostico = diagnosticar_estrutura(deteccao.url_normalizada)
-    return deteccao, diagnostico
-
-
-def ler_url_universal(url: str, usar_playwright: bool = True):
-    """Retorna (resultado, deteccao), preservando os parsers oficiais existentes."""
-    deteccao = detectar_url(url)
-
-    # Nesta fase, dominios em diagnostico sao analisados separadamente pela
-    # funcao diagnosticar_url_universal. Eles nao geram XLSX automaticamente.
-    if deteccao.estrategia == "diagnostico":
-        return None, deteccao
-
+def ler_url_universal(url, usar_playwright=True):
+    deteccao=detectar_url(url)
+    if deteccao.estrategia == "diagnostico": return None,deteccao
     from fetchers import buscar_por_url
-    resultado = buscar_por_url(deteccao.url_normalizada, usar_playwright=bool(usar_playwright))
-
+    resultado=buscar_por_url(deteccao.url_normalizada, usar_playwright=bool(usar_playwright))
     try:
-        setattr(resultado, "_leitor_universal", {
-            "plataforma": deteccao.plataforma,
-            "metodo": deteccao.metodo,
-            "confianca": deteccao.confianca,
-            "estrategia": deteccao.estrategia,
-            "motivo": deteccao.motivo,
-            "url_normalizada": deteccao.url_normalizada,
-        })
-    except Exception:
-        pass
-
-    return resultado, deteccao
+        setattr(resultado,"_leitor_universal",{"plataforma":deteccao.plataforma,"metodo":deteccao.metodo,"confianca":deteccao.confianca,"estrategia":deteccao.estrategia,"motivo":deteccao.motivo,"url_normalizada":deteccao.url_normalizada})
+    except Exception: pass
+    return resultado,deteccao
