@@ -64,19 +64,30 @@ def _json_frames(texto: str) -> List[Any]:
 
 
 def _coletar_documentos_firestore(value: Any, out: List[Dict[str, Any]], depth: int = 0):
+    """Coleta documentos Firestore sem duplicar o mesmo documentChange.
+
+    Quando um objeto documentChange contém document, o documento é materializado
+    uma única vez e a recursão não entra novamente nos wrappers já consumidos.
+    A deduplicação final por nome de documento continua no probe de rede.
+    """
     if depth > 15 or len(out) >= 600:
         return
     if isinstance(value, dict):
         doc = None
+        consumidos = set()
         if isinstance(value.get("document"), dict):
             doc = value.get("document")
+            consumidos.add("document")
         elif isinstance(value.get("documentChange"), dict) and isinstance(value["documentChange"].get("document"), dict):
             doc = value["documentChange"].get("document")
+            consumidos.add("documentChange")
         if isinstance(doc, dict) and isinstance(doc.get("fields"), dict):
             dec = {str(k): _firestore_value(v) for k, v in doc["fields"].items()}
             dec["_firestore_document"] = doc.get("name") or ""
             out.append(dec)
-        for v in value.values():
+        for k, v in value.items():
+            if k in consumidos:
+                continue
             if isinstance(v, (dict, list)):
                 _coletar_documentos_firestore(v, out, depth + 1)
     elif isinstance(value, list):
