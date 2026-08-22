@@ -90,6 +90,16 @@ def _detectar_por_dominio(url: str):
     return None, None, None
 
 
+def _host_contem_nome_de_dominio_sem_corresponder(host: str) -> bool:
+    """Bloqueia falso positivo como brendi.com.br.exemplo.com.
+
+    O detector legado pode procurar substrings no URL inteiro. Se o host contem o
+    texto de um dominio conhecido, mas nao e esse dominio nem subdominio dele,
+    nao delegamos ao detector legado.
+    """
+    return any(base in host and not _dominio_corresponde(host, base) for base in DOMINIOS_CONHECIDOS)
+
+
 def detectar_url(url: str) -> DeteccaoURL:
     normalizada = normalizar_url(url)
     plataforma, estrategia, base = _detectar_por_dominio(normalizada)
@@ -100,13 +110,15 @@ def detectar_url(url: str) -> DeteccaoURL:
             estrategia, f"Dominio reconhecido: {base}"
         )
 
-    from fetchers import detectar_plataforma
-    existente = detectar_plataforma(normalizada)
-    if existente:
-        return DeteccaoURL(
-            url, normalizada, existente, "detector-existente", "alta", "auto",
-            "Reconhecido pelo detector atual do projeto"
-        )
+    host = (urlparse(normalizada).hostname or "").lower()
+    if not _host_contem_nome_de_dominio_sem_corresponder(host):
+        from fetchers import detectar_plataforma
+        existente = detectar_plataforma(normalizada)
+        if existente:
+            return DeteccaoURL(
+                url, normalizada, existente, "detector-existente", "alta", "auto",
+                "Reconhecido pelo detector atual do projeto"
+            )
 
     return DeteccaoURL(
         url, normalizada, None, "fallback-universal", "a-confirmar", "diagnostico",
