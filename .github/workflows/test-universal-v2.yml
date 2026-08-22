@@ -21,7 +21,8 @@ jobs:
       - name: Dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 openpyxl pytest
+          pip install requests beautifulsoup4 openpyxl pytest playwright
+          python -m playwright install --with-deps chromium
 
       - name: Compilar modulos V2
         run: |
@@ -34,9 +35,25 @@ jobs:
           python -m py_compile universal_export.py
           python -m py_compile browser_probe.py
           python -m py_compile preview_runner.py
+          python -m py_compile real_url_validation.py
 
-      - name: Testes V2
+      - name: Testes offline V2
         run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_pizza_rules.py test_universal_price_validation.py test_universal_export.py
+
+      - name: Validacao controlada de URLs reais
+        continue-on-error: true
+        run: python real_url_validation.py
+
+      - name: Publicar relatorio da bateria real
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leitor-universal-v2-relatorio-real
+          path: |
+            artifacts/real_url_report.json
+            artifacts/real_url_report.md
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Garantir isolamento da main
         run: |
