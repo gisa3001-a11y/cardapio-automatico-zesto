@@ -49,6 +49,13 @@ DOMINIOS_CONHECIDOS = {
     "theozburger.com.br": ("Yooga Delivery", "diagnostico"),
     "neemo.com.br": ("Neemo", "diagnostico"),
     "entregueja.com.br": ("EntregueJa", "diagnostico"),
+    "ecta.com.br": ("ECTA", "diagnostico"),
+    "pedidosite.com.br": ("PedidoSite", "diagnostico"),
+    "bigd.im": ("BigD", "diagnostico"),
+    "my.canva.site": ("Canva Site", "diagnostico"),
+    "chefjuliaandrade.com.br": ("Dominio proprio", "diagnostico"),
+    "loja.menu": ("Loja.Menu", "diagnostico"),
+    "lapizzaiola.com.br": ("Dominio proprio", "diagnostico"),
 }
 
 # Parametros que normalmente sao apenas rastreamento e nao identificam o cardapio.
