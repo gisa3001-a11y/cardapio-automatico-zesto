@@ -11,7 +11,11 @@ from browser_probe import coletar_json_publico
 from generic_preview import gerar_previa_de_payload
 
 CASOS = [
-    ("Hubt", "https://www.hubt.com.br/oriental-suzano/"),
+    ("RapidFood", "https://rapidfood.com.br/panelamineira"),
+    ("Atlas Automacao", "https://atlasautomacao.app.br/confeitariaandressamarquespds"),
+    ("MenuDino", "https://pollolokoouroverde.menudino.com/"),
+    ("Ola Click", "https://tatys-burger-2.ola.click/products"),
+    ("Saipos", "https://temperodaleia.saipos.com/"),
     ("Loja.Menu", "https://loja.menu/bombuque"),
 ]
 
@@ -40,77 +44,115 @@ def _schema(value: Any, depth: int = 0, max_depth: int = 5):
 
 
 def _listar_listas_de_dict(value: Any, path: str = "$", out: List[Dict[str, Any]] | None = None, depth: int = 0):
-    if out is None: out = []
-    if depth > 8 or len(out) >= 80: return out
+    if out is None:
+        out = []
+    if depth > 8 or len(out) >= 100:
+        return out
     if isinstance(value, dict):
-        for k, v in list(value.items())[:80]: _listar_listas_de_dict(v, f"{path}.{k}", out, depth + 1)
+        for k, v in list(value.items())[:100]:
+            _listar_listas_de_dict(v, f"{path}.{k}", out, depth + 1)
     elif isinstance(value, list):
-        dicts = [x for x in value[:20] if isinstance(x, dict)]
+        dicts = [x for x in value[:30] if isinstance(x, dict)]
         if dicts:
             chaves = []
-            for obj in dicts[:5]:
+            for obj in dicts[:8]:
                 for k in obj.keys():
-                    if k not in chaves: chaves.append(k)
-            out.append({"path": path, "tamanho": len(value), "chaves_amostra": chaves[:50]})
-            for i, obj in enumerate(dicts[:3]): _listar_listas_de_dict(obj, f"{path}[{i}]", out, depth + 1)
+                    if k not in chaves:
+                        chaves.append(k)
+            out.append({"path": path, "tamanho": len(value), "chaves_amostra": chaves[:60]})
+            for i, obj in enumerate(dicts[:4]):
+                _listar_listas_de_dict(obj, f"{path}[{i}]", out, depth + 1)
     return out
 
 
 def _score_generico(payload: Any):
     try:
         previa = gerar_previa_de_payload(payload)
-        return {"produtos_genericos": len(previa.produtos), "opcoes_genericas": len(previa.grupos), "confianca_generica": previa.confianca, "candidatos_genericos": previa.total_candidatos}
+        return {
+            "produtos_genericos": len(previa.produtos),
+            "opcoes_genericas": len(previa.grupos),
+            "confianca_generica": previa.confianca,
+            "candidatos_genericos": previa.total_candidatos,
+        }
     except Exception as exc:
         return {"erro_previa_generica": str(exc)}
 
 
-def _resumo_hubt(payload: Any):
-    if not isinstance(payload, dict) or not isinstance(payload.get("modules"), list): return None
-    tipos = {str(x.get("id")): x.get("name") for x in (payload.get("moduleTypes") or []) if isinstance(x, dict)}
-    mods = []
-    for m in payload.get("modules") or []:
-        if not isinstance(m, dict): continue
-        itens = m.get("items") or []
-        amostra = itens[0] if itens and isinstance(itens[0], dict) else {}
-        props = m.get("properties") if isinstance(m.get("properties"), dict) else {}
-        mt = str(m.get("_moduleType") or "")
-        mods.append({
-            "module_id": m.get("_module"), "module_type_id": mt, "module_type_name": tipos.get(mt),
-            "itens": len(itens) if isinstance(itens, list) else 0,
-            "item_chaves": list(amostra.keys())[:60], "properties_chaves": list(props.keys())[:60],
-        })
-    return {"modules": mods, "module_types": tipos}
-
-
 def _resumo_firestore(payload: Any):
-    if not isinstance(payload, list): return None
+    if not isinstance(payload, list):
+        return None
     docs = []
-    for row in payload[:20]:
-        if not isinstance(row, dict) or not isinstance(row.get("document"), dict): continue
+    for row in payload[:30]:
+        if not isinstance(row, dict) or not isinstance(row.get("document"), dict):
+            continue
         d = row["document"]
         fields = d.get("fields") if isinstance(d.get("fields"), dict) else {}
-        docs.append({"document_name": d.get("name"), "field_keys": list(fields.keys())[:80]})
+        docs.append({"document_name": d.get("name"), "field_keys": list(fields.keys())[:100]})
     return docs or None
+
+
+def _sinais_cardapio(payload: Any, path: str = "$", out: List[Dict[str, Any]] | None = None, depth: int = 0):
+    """Localiza objetos com chaves semanticamente proximas de produto/cardapio."""
+    if out is None:
+        out = []
+    if depth > 9 or len(out) >= 120:
+        return out
+    if isinstance(payload, dict):
+        chaves = {str(k).lower() for k in payload.keys()}
+        sinais = sorted(chaves.intersection({
+            "product", "products", "produto", "produtos", "item", "items",
+            "menu", "menus", "category", "categories", "categoria", "categorias",
+            "price", "prices", "preco", "precos", "name", "nome", "title", "titulo",
+            "options", "option_groups", "extras", "addons", "complements", "complementos",
+        }))
+        if len(sinais) >= 2:
+            out.append({"path": path, "sinais": sinais[:30], "chaves": list(payload.keys())[:80]})
+        for k, v in list(payload.items())[:120]:
+            if isinstance(v, (dict, list)):
+                _sinais_cardapio(v, f"{path}.{k}", out, depth + 1)
+    elif isinstance(payload, list):
+        for i, v in enumerate(payload[:20]):
+            if isinstance(v, (dict, list)):
+                _sinais_cardapio(v, f"{path}[{i}]", out, depth + 1)
+    return out
 
 
 def main():
     saida = []
     for nome, url in CASOS:
         print(f"[probe profundo] {nome}", flush=True)
-        probe = coletar_json_publico(url, timeout_ms=35000, max_payloads=220)
+        probe = coletar_json_publico(url, timeout_ms=40000, max_payloads=260)
         respostas = []
         for fonte, payload in probe.payloads:
             low = fonte.lower()
-            if any(x in low for x in ("sentry", "fontmanifest", "assetmanifest", "analytics", "stylizations", "social_logins")): continue
+            if any(x in low for x in ("sentry", "fontmanifest", "assetmanifest", "analytics", "stylizations", "social_logins")):
+                continue
             extra = {}
-            h = _resumo_hubt(payload)
-            if h: extra["hubt"] = h
             f = _resumo_firestore(payload)
-            if f: extra["firestore"] = f
-            respostas.append({"fonte": fonte, "schema": _schema(payload), "listas_de_objetos": _listar_listas_de_dict(payload), **extra, **_score_generico(payload)})
-        saida.append({"caso": nome, "url": url, "url_final": probe.url_final, "erro": probe.erro, "respostas": respostas[:100]})
+            if f:
+                extra["firestore"] = f
+            sinais = _sinais_cardapio(payload)
+            if sinais:
+                extra["sinais_cardapio"] = sinais[:80]
+            respostas.append({
+                "fonte": fonte,
+                "schema": _schema(payload),
+                "listas_de_objetos": _listar_listas_de_dict(payload),
+                **extra,
+                **_score_generico(payload),
+            })
+        saida.append({
+            "caso": nome,
+            "url": url,
+            "url_final": probe.url_final,
+            "erro": probe.erro,
+            "total_payloads": len(probe.payloads),
+            "respostas": respostas[:140],
+        })
     Path("artifacts").mkdir(exist_ok=True)
     Path("artifacts/probe_endpoints.json").write_text(json.dumps(saida, ensure_ascii=False, indent=2), encoding="utf-8")
     return 0
 
-if __name__ == "__main__": raise SystemExit(main())
+
+if __name__ == "__main__":
+    raise SystemExit(main())
