@@ -1,7 +1,8 @@
 """Executa a previa generica do Leitor Universal V2.
 
-Fluxo: localiza JSON publico -> normaliza produtos/grupos -> resolve preco zero
-quando ha evidencia -> aplica regras de pizza -> valida tecnicamente.
+Fluxo: tenta JSON publico por HTTP -> se a pagina for SPA sem JSON utilizavel,
+usa Playwright opcional para observar respostas JSON carregadas pelo navegador ->
+normaliza produtos/grupos -> resolve preco zero -> aplica pizza -> valida.
 Nao gera XLSX automaticamente.
 """
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from pizza_rules import aplicar_regras_pizza
 from price_resolution import aplicar_resolucao_precos
 from structure_detector import HEADERS, _extrair_json_scripts
 from universal_validation import validar_previa
+
 
 @dataclass
 class ResultadoPreviaUniversal:
@@ -44,11 +46,10 @@ class ResultadoPreviaUniversal:
             "validacao": self.validacao,
             "total_candidatos": self.total_candidatos,
             "avisos": self.avisos,
-            # Mesmo se a validacao tecnica aprovar, a exportacao automatica fica
-            # bloqueada ate passar pela bateria controlada de URLs reais.
             "pode_gerar_xlsx": False,
             "elegivel_para_teste_xlsx": bool(self.validacao.get("aprovado")),
         }
+
 
 def _vazio(url: str, status: Optional[int], fonte: str, aviso: str = "", erro: Optional[str] = None):
     return ResultadoPreviaUniversal(
@@ -58,7 +59,23 @@ def _vazio(url: str, status: Optional[int], fonte: str, aviso: str = "", erro: O
         total_candidatos=0, avisos=[aviso] if aviso else [], erro=erro,
     )
 
-def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniversal:
+
+def _avaliar_opcoes(opcoes):
+    melhor = None
+    melhor_fonte = ""
+    for fonte, payload in opcoes:
+        try:
+            previa = gerar_previa_de_payload(payload)
+        except Exception:
+            continue
+        chave = (len(previa.produtos), len(previa.grupos), previa.total_candidatos)
+        if melhor is None or chave > melhor[0]:
+            melhor = (chave, previa)
+            melhor_fonte = fonte
+    return melhor, melhor_fonte
+
+
+def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool = True) -> ResultadoPreviaUniversal:
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
         status = r.status_code
@@ -75,26 +92,51 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
             soup = BeautifulSoup(r.text, "html.parser")
             opcoes.extend(_extrair_json_scripts(soup))
 
-        melhor = None
-        melhor_fonte = ""
-        for fonte, payload in opcoes:
-            previa = gerar_previa_de_payload(payload)
-            chave = (len(previa.produtos), len(previa.grupos), previa.total_candidatos)
-            if melhor is None or chave > melhor[0]:
-                melhor = (chave, previa)
-                melhor_fonte = fonte
+        melhor, melhor_fonte = _avaliar_opcoes(opcoes)
+        url_final = r.url
+        browser_aviso = ""
 
-        if melhor is None:
-            return _vazio(r.url, status, "nenhuma", "Nenhuma estrutura JSON publica utilizavel foi localizada.")
+        # Muitas plataformas modernas devolvem apenas 'Carregando...' no HTML
+        # e buscam o cardapio via XHR/fetch depois. Nesses casos observamos somente
+        # respostas JSON publicas produzidas pela propria navegacao.
+        if (melhor is None or len(melhor[1].produtos) == 0) and permitir_browser:
+            try:
+                from browser_probe import coletar_json_publico
+                probe = coletar_json_publico(r.url, timeout_ms=max(10000, timeout * 1000))
+                if probe.url_final:
+                    url_final = probe.url_final
+                melhor_browser, fonte_browser = _avaliar_opcoes(probe.payloads)
+                if melhor_browser is not None and (
+                    melhor is None or melhor_browser[0] > melhor[0]
+                ):
+                    melhor = melhor_browser
+                    melhor_fonte = fonte_browser
+                if probe.erro:
+                    browser_aviso = "Fallback de navegador indisponivel/incompleto: " + probe.erro
+            except Exception as exc:
+                browser_aviso = "Fallback de navegador falhou: " + str(exc)
+
+        if melhor is None or len(melhor[1].produtos) == 0:
+            aviso = "Nenhuma estrutura de produtos utilizavel foi localizada por HTTP"
+            if permitir_browser:
+                aviso += " nem pelo fallback de navegador"
+            aviso += "."
+            if browser_aviso:
+                aviso += " " + browser_aviso
+            return _vazio(url_final, status, melhor_fonte or "nenhuma", aviso)
 
         previa = melhor[1]
         data = previa.to_dict()
-
         produtos_precificados, diagnosticos_precos = aplicar_resolucao_precos(data["produtos"], data["grupos"])
         produtos, diagnosticos_pizza = aplicar_regras_pizza(produtos_precificados, data["grupos"])
         pizzas = [d for d in diagnosticos_pizza if d.get("pizza")]
 
         avisos = list(data["avisos"])
+        if melhor_fonte.startswith("browser:"):
+            avisos.append("Cardapio localizado por resposta JSON observada no navegador (SPA/dinamico).")
+        if browser_aviso:
+            avisos.append(browser_aviso)
+
         resolvidos = sum(1 for d in diagnosticos_precos if d.get("resolvido"))
         pendentes_zero = sum(1 for d in diagnosticos_precos if float(d.get("preco_original", 0) or 0) == 0 and not d.get("resolvido"))
         if resolvidos:
@@ -114,7 +156,7 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
             avisos.append("Previa ainda nao elegivel para teste de exportacao: " + "; ".join(validacao["erros"][:4]))
 
         return ResultadoPreviaUniversal(
-            url_final=r.url,
+            url_final=url_final,
             status_http=status,
             fonte=melhor_fonte,
             confianca=previa.confianca,
