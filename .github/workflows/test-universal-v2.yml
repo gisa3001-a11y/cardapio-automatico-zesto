@@ -46,6 +46,7 @@ jobs:
           python -m py_compile real_url_validation.py
           python -m py_compile real_url_validation_parallel.py
           python -m py_compile debug_probe_urls.py
+          python -m py_compile debug_network_map.py
           python -m py_compile universal_readiness.py
 
       - name: Testes offline V2
@@ -55,12 +56,18 @@ jobs:
         continue-on-error: true
         run: python debug_probe_urls.py
 
+      - name: Mapa de rede dos casos pendentes
+        continue-on-error: true
+        run: python debug_network_map.py
+
       - name: Publicar probe antecipado
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: leitor-universal-v2-probe-profundo
-          path: artifacts/probe_endpoints.json
+          path: |
+            artifacts/probe_endpoints.json
+            artifacts/network_map.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -81,6 +88,7 @@ jobs:
             artifacts/real_url_report.json
             artifacts/real_url_report.md
             artifacts/probe_endpoints.json
+            artifacts/network_map.json
             artifacts/readiness.json
           if-no-files-found: warn
           retention-days: 14
