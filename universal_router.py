@@ -5,7 +5,8 @@ Esta camada NAO substitui os parsers atuais. Ela apenas:
 2) remove parametros de rastreamento conhecidos;
 3) identifica a plataforma por dominio/subdominio;
 4) escolhe a estrategia de leitura mais adequada;
-5) delega ao buscar_por_url ja existente em fetchers.py.
+5) delega ao buscar_por_url ja existente em fetchers.py;
+6) quando necessario, aciona o detector estrutural sem gerar XLSX automaticamente.
 
 A main oficial nao usa este arquivo enquanto a V2 estiver em testes.
 """
@@ -26,10 +27,6 @@ class DeteccaoURL:
     motivo: str
 
 
-# Dominio-base -> (plataforma, estrategia)
-# direto = leitor atual pode tentar HTTP/HTML/API primeiro.
-# playwright-prioritario = pagina normalmente depende de carregamento dinamico.
-# diagnostico = dominio conhecido pela V2, mas ainda sem parser especifico validado.
 DOMINIOS_CONHECIDOS = {
     "anota.ai": ("Anota AI", "playwright-prioritario"),
     "rapidfood.com.br": ("RapidFood", "direto"),
@@ -58,7 +55,6 @@ DOMINIOS_CONHECIDOS = {
     "lapizzaiola.com.br": ("Dominio proprio", "diagnostico"),
 }
 
-# Parametros que normalmente sao apenas rastreamento e nao identificam o cardapio.
 PARAMETROS_RASTREAMENTO = {
     "fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid",
 }
@@ -80,28 +76,21 @@ def normalizar_url(url: str) -> str:
     valor = (url or "").strip()
     if not valor:
         raise ValueError("Informe a URL do cardapio.")
-
     if "://" not in valor:
         valor = "https://" + valor
-
     p = urlparse(valor)
     if p.scheme.lower() not in ("http", "https") or not p.netloc:
         raise ValueError("URL de cardapio invalida.")
-
     host = (p.hostname or "").lower().strip(".")
     if not host:
         raise ValueError("URL de cardapio invalida.")
-
     porta = f":{p.port}" if p.port else ""
     caminho = p.path or "/"
     query = _limpar_query(p.query)
-
-    # Fragmentos (#...) nao participam da requisicao HTTP.
     return urlunparse((p.scheme.lower(), host + porta, caminho, "", query, ""))
 
 
 def _dominio_corresponde(host: str, dominio_base: str) -> bool:
-    """Aceita o dominio exato e qualquer subdominio real dele."""
     return host == dominio_base or host.endswith("." + dominio_base)
 
 
@@ -115,7 +104,6 @@ def _detectar_por_dominio(url_normalizada: str):
 
 def detectar_url(url: str) -> DeteccaoURL:
     normalizada = normalizar_url(url)
-
     plataforma, estrategia, dominio_base = _detectar_por_dominio(normalizada)
     if plataforma:
         confianca = "alta" if estrategia != "diagnostico" else "dominio-confirmado"
@@ -129,9 +117,7 @@ def detectar_url(url: str) -> DeteccaoURL:
             motivo=f"Dominio reconhecido: {dominio_base}",
         )
 
-    # Segunda opiniao: preserva toda a inteligencia ja existente no projeto.
     from fetchers import detectar_plataforma
-
     plataforma_existente = detectar_plataforma(normalizada)
     if plataforma_existente:
         return DeteccaoURL(
@@ -155,18 +141,25 @@ def detectar_url(url: str) -> DeteccaoURL:
     )
 
 
+def diagnosticar_url_universal(url: str):
+    """Executa a nova analise estrutural sem alterar parsers nem gerar planilha."""
+    deteccao = detectar_url(url)
+    from structure_detector import diagnosticar_estrutura
+    diagnostico = diagnosticar_estrutura(deteccao.url_normalizada)
+    return deteccao, diagnostico
+
+
 def ler_url_universal(url: str, usar_playwright: bool = True):
-    """Retorna (resultado, deteccao) sem alterar os parsers existentes."""
+    """Retorna (resultado, deteccao), preservando os parsers oficiais existentes."""
     deteccao = detectar_url(url)
 
-    # Dominios em diagnostico ainda nao possuem parser especifico validado.
+    # Nesta fase, dominios em diagnostico sao analisados separadamente pela
+    # funcao diagnosticar_url_universal. Eles nao geram XLSX automaticamente.
     if deteccao.estrategia == "diagnostico":
         return None, deteccao
 
     from fetchers import buscar_por_url
-
-    playwright = bool(usar_playwright)
-    resultado = buscar_por_url(deteccao.url_normalizada, usar_playwright=playwright)
+    resultado = buscar_por_url(deteccao.url_normalizada, usar_playwright=bool(usar_playwright))
 
     try:
         setattr(resultado, "_leitor_universal", {
