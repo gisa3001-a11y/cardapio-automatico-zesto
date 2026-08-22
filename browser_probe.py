@@ -4,12 +4,14 @@ Usado quando a leitura HTTP retorna uma casca SPA, falha ou nao contem JSON
 utilizavel. Captura prioritariamente respostas XHR/fetch JSON publicas carregadas
 pela propria pagina. Nao gera XLSX e nao toca na main.
 
-V2.4: a mesma URL pode ser chamada varias vezes com corpos POST diferentes
-(ex.: Firestore documents:runQuery). A deduplicacao considera tambem o corpo da
-requisicao para nao perder consultas posteriores do mesmo endpoint.
+V2.5:
+- a mesma URL pode ser chamada varias vezes com corpos POST diferentes;
+- apos a renderizacao, tambem coleta JSON embutido no DOM (ex.: __NEXT_DATA__,
+  application/json), o que ajuda SPAs que hidratam o cardapio sem nova chamada XHR.
 """
 from dataclasses import dataclass
 import hashlib
+import json
 from typing import Any, List, Tuple
 
 
@@ -47,6 +49,33 @@ def _fonte_resposta(resp) -> str:
     return f"browser:{resp.url}#req={digest}"
 
 
+def _coletar_json_dom(page, payloads: List[Tuple[str, Any]], vistos_dom: set, max_payloads: int):
+    """Coleta somente scripts JSON publicos renderizados na propria pagina."""
+    if len(payloads) >= max_payloads:
+        return
+    try:
+        scripts = page.locator('script[type="application/json"], script#__NEXT_DATA__, script[data-json]').all()
+    except Exception:
+        scripts = []
+
+    for idx, script in enumerate(scripts):
+        if len(payloads) >= max_payloads:
+            break
+        try:
+            texto = (script.text_content() or "").strip()
+            if not texto or len(texto) > 8_000_000:
+                continue
+            digest = hashlib.sha1(texto.encode("utf-8", "ignore")).hexdigest()
+            if digest in vistos_dom:
+                continue
+            data = json.loads(texto)
+            vistos_dom.add(digest)
+            sid = script.get_attribute("id") or script.get_attribute("data-json") or str(idx)
+            payloads.append((f"browser-dom:{page.url}#script={sid}", data))
+        except Exception:
+            continue
+
+
 def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 120) -> BrowserProbeResult:
     try:
         from playwright.sync_api import sync_playwright
@@ -55,6 +84,7 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
 
     payloads: List[Tuple[str, Any]] = []
     vistos = set()
+    vistos_dom = set()
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -79,8 +109,6 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
                         return
                     url_resp = resp.url
                     low = url_resp.lower()
-                    # XHR/fetch tem prioridade. JSON estatico so entra quando nao
-                    # parece asset/manifest irrelevante.
                     if req_type not in ("xhr", "fetch") and any(t in low for t in IGNORAR_URL_TERMS):
                         return
                     chave = _chave_requisicao(resp)
@@ -99,11 +127,12 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
             except Exception:
                 pass
 
-            # Alguns catalogos carregam blocos adicionais somente apos a primeira
-            # renderizacao/scroll. Um scroll simples nao executa acoes destrutivas.
+            _coletar_json_dom(page, payloads, vistos_dom, max_payloads)
+
             try:
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 page.wait_for_timeout(1800)
+                _coletar_json_dom(page, payloads, vistos_dom, max_payloads)
                 page.evaluate("window.scrollTo(0, 0)")
                 page.wait_for_timeout(700)
             except Exception:
