@@ -54,3 +54,42 @@ def test_adaptador_neemo_ignora_item_oculto():
         payload,
     )
     assert adaptado is payload or adaptado.get("products") == []
+
+
+def test_adaptador_hubt_converte_modulos_de_produtos():
+    payload = {
+        "moduleTypes": {"mt-prod": {"name": "Produtos"}},
+        "modules": [
+            {
+                "id": "m1",
+                "title": "Orientais",
+                "moduleTypeId": "mt-prod",
+                "items": [
+                    {
+                        "id": "p1",
+                        "name": "Yakissoba",
+                        "description": "Legumes e carne",
+                        "price": 32.5,
+                        "image": "https://img.exemplo/yaki.jpg",
+                    },
+                    {"id": "p2", "name": "", "price": 10},
+                ],
+            },
+            {
+                "id": "m2",
+                "title": "Banner",
+                "moduleTypeId": "mt-banner",
+                "items": [{"id": "b1", "name": "Promocao", "price": 1}],
+            },
+        ],
+    }
+    adaptado, nome = adaptar_payload(
+        "browser:https://storage.googleapis.com/download/storage/v1/b/hassets/o/s30769%2Fprops.json?alt=media",
+        payload,
+    )
+    assert nome == "adaptador-hubt"
+    previa = gerar_previa_de_payload(adaptado)
+    assert len(previa.produtos) == 1
+    assert previa.produtos[0].nome == "Yakissoba"
+    assert previa.produtos[0].preco == 32.5
+    assert previa.produtos[0].categoria == "Orientais"
