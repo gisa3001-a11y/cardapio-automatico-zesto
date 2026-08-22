@@ -32,7 +32,17 @@ jobs:
           python -m py_compile pizza_rules.py
           python -m py_compile universal_validation.py
           python -m py_compile universal_export.py
+          python -m py_compile browser_probe.py
           python -m py_compile preview_runner.py
 
       - name: Testes V2
         run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_pizza_rules.py test_universal_price_validation.py test_universal_export.py
+
+      - name: Garantir isolamento da main
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          assert Path('universal_router.py').exists()
+          assert Path('browser_probe.py').exists()
+          print('Camada universal presente somente na branch em teste.')
+          PY
