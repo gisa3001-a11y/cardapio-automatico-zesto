@@ -20,6 +20,7 @@ class ResultadoPreviaUniversal:
     fonte: str
     confianca: str
     produtos: List[Dict[str, Any]]
+    grupos: List[Dict[str, Any]]
     total_candidatos: int
     avisos: List[str]
     erro: Optional[str] = None
@@ -31,6 +32,7 @@ class ResultadoPreviaUniversal:
             "fonte": self.fonte,
             "confianca": self.confianca,
             "produtos": self.produtos,
+            "grupos": self.grupos,
             "total_candidatos": self.total_candidatos,
             "avisos": self.avisos,
             "erro": self.erro,
@@ -59,7 +61,7 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
         melhor_fonte = ""
         for fonte, payload in opcoes:
             previa = gerar_previa_de_payload(payload)
-            chave = (len(previa.produtos), previa.total_candidatos)
+            chave = (len(previa.produtos), len(previa.grupos), previa.total_candidatos)
             if melhor is None or chave > melhor[0]:
                 melhor = (chave, previa)
                 melhor_fonte = fonte
@@ -71,6 +73,7 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
                 fonte="nenhuma",
                 confianca="baixa",
                 produtos=[],
+                grupos=[],
                 total_candidatos=0,
                 avisos=["Nenhuma estrutura JSON publica utilizavel foi localizada."],
             )
@@ -83,6 +86,7 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
             fonte=melhor_fonte,
             confianca=previa.confianca,
             produtos=data["produtos"],
+            grupos=data["grupos"],
             total_candidatos=previa.total_candidatos,
             avisos=data["avisos"],
         )
@@ -94,6 +98,7 @@ def gerar_previa_universal(url: str, timeout: int = 25) -> ResultadoPreviaUniver
             fonte="erro",
             confianca="baixa",
             produtos=[],
+            grupos=[],
             total_candidatos=0,
             avisos=[],
             erro=str(exc),
