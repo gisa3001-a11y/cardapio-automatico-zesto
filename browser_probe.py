@@ -3,8 +3,13 @@
 Usado quando a leitura HTTP retorna uma casca SPA, falha ou nao contem JSON
 utilizavel. Captura prioritariamente respostas XHR/fetch JSON publicas carregadas
 pela propria pagina. Nao gera XLSX e nao toca na main.
+
+V2.4: a mesma URL pode ser chamada varias vezes com corpos POST diferentes
+(ex.: Firestore documents:runQuery). A deduplicacao considera tambem o corpo da
+requisicao para nao perder consultas posteriores do mesmo endpoint.
 """
 from dataclasses import dataclass
+import hashlib
 from typing import Any, List, Tuple
 
 
@@ -19,6 +24,27 @@ IGNORAR_URL_TERMS = (
     "fontmanifest", "manifest.json", "asset-manifest", "favicon", "translations",
     "locales/", "analytics", "google-analytics", "gtag", "clarity", "hotjar",
 )
+
+
+def _chave_requisicao(resp):
+    """Distingue chamadas ao mesmo endpoint quando o POST/body muda."""
+    try:
+        post_data = resp.request.post_data or ""
+    except Exception:
+        post_data = ""
+    return resp.url, post_data
+
+
+def _fonte_resposta(resp) -> str:
+    """Mantem URL legivel e adiciona hash curto somente quando houver POST."""
+    try:
+        post_data = resp.request.post_data or ""
+    except Exception:
+        post_data = ""
+    if not post_data:
+        return f"browser:{resp.url}"
+    digest = hashlib.sha1(post_data.encode("utf-8", "ignore")).hexdigest()[:10]
+    return f"browser:{resp.url}#req={digest}"
 
 
 def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 120) -> BrowserProbeResult:
@@ -57,11 +83,12 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
                     # parece asset/manifest irrelevante.
                     if req_type not in ("xhr", "fetch") and any(t in low for t in IGNORAR_URL_TERMS):
                         return
-                    if url_resp in vistos:
+                    chave = _chave_requisicao(resp)
+                    if chave in vistos:
                         return
                     data = resp.json()
-                    vistos.add(url_resp)
-                    payloads.append((f"browser:{url_resp}", data))
+                    vistos.add(chave)
+                    payloads.append((_fonte_resposta(resp), data))
                 except Exception:
                     pass
 
