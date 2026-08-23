@@ -1,8 +1,9 @@
 """Leitura publica e conservadora do RapidFood para o Leitor Universal V2.
 
-Tenta primeiro os objetos openProductModal(...) presentes no HTML. Quando a
-plataforma entrega os cards somente depois da renderizacao, usa um fallback
-Playwright dirigido por imagens de produtos + preco visivel. Nao gera XLSX.
+Tenta primeiro os objetos openProductModal(...) presentes no HTML. Como a
+pagina publica tambem entrega nome, preco e categoria no HTML renderizado pelo
+servidor, existe um segundo caminho deterministico por headings/price. So depois
+disso usamos Playwright. Nao gera XLSX.
 """
 from __future__ import annotations
 
@@ -11,11 +12,18 @@ import re
 from typing import Any, Dict, List, Tuple
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+MONEY_RE = re.compile(r"R\$\s*([0-9]{1,5}(?:[.,][0-9]{2})?)", re.I)
+BAD_TITLES = {
+    "cart", "carrinho", "categories", "categorias", "store info", "informacoes da loja",
+    "my addresses", "meus enderecos", "order history", "historico de pedidos",
+    "sign in", "entrar", "any notes?", "observacoes", "total",
 }
 
 
@@ -76,13 +84,102 @@ def _normalizar(produtos: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"products": out}
 
 
-def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
-    """Fallback dirigido ao DOM real da RapidFood.
+def _texto_limpo(tag: Tag | None) -> str:
+    if tag is None:
+        return ""
+    return " ".join(tag.get_text(" ", strip=True).split())
 
-    O mapa de rede confirma fotos em /dashboard/uploads/produtos/. A plataforma
-    pode usa-las tanto em <img> quanto em background-image; por isso o probe
-    considera os dois formatos e faz scroll progressivo antes de coletar cards.
+
+def extrair_cards_semanticos_html(html: str) -> List[Dict[str, Any]]:
+    """Extrai produtos do HTML publico sem depender de classes CSS.
+
+    O RapidFood publica categorias em h2 e produtos em h3. Para cada h3,
+    procuramos um ancestral pequeno que contenha preco em R$ e um sinal de acao
+    de produto. Isso evita capturar totais, fretes ou o carrinho.
     """
+    soup = BeautifulSoup(html or "", "html.parser")
+    produtos: List[Dict[str, Any]] = []
+    vistos = set()
+    categoria_atual = ""
+
+    for tag in soup.find_all(["h2", "h3"]):
+        titulo = _texto_limpo(tag)
+        if not titulo:
+            continue
+        low = titulo.casefold()
+        if tag.name == "h2":
+            if low not in BAD_TITLES and len(titulo) <= 180:
+                categoria_atual = titulo
+            continue
+
+        if low in BAD_TITLES or len(titulo) < 2 or len(titulo) > 180:
+            continue
+
+        card = tag
+        escolhido = None
+        for _ in range(8):
+            card = card.parent if isinstance(card.parent, Tag) else None
+            if card is None:
+                break
+            texto = _texto_limpo(card)
+            if len(texto) > 2200:
+                break
+            if MONEY_RE.search(texto):
+                # Sinal conservador de produto: botao/link de adicionar, ou imagem
+                acao = any(
+                    re.search(r"adicionar|add(?: to cart)?|comprar", _texto_limpo(x), re.I)
+                    for x in card.find_all(["button", "a"], limit=12)
+                )
+                if acao or card.find("img") is not None:
+                    escolhido = card
+                    break
+        if escolhido is None:
+            continue
+
+        texto = _texto_limpo(escolhido)
+        precos = MONEY_RE.findall(texto)
+        if not precos:
+            continue
+        preco = _to_float(precos[0])
+        if preco <= 0 or preco > 5000:
+            continue
+
+        descricao = ""
+        for cand in escolhido.find_all(["p", "span", "div"], limit=30):
+            t = _texto_limpo(cand)
+            if not t or t == titulo or MONEY_RE.search(t):
+                continue
+            if re.search(r"adicionar|add(?: to cart)?|promo|mais pedido|most ordered", t, re.I):
+                continue
+            if 6 <= len(t) <= 600:
+                descricao = t
+                break
+
+        imagem = ""
+        img = escolhido.find("img")
+        if img is not None:
+            src = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
+            if isinstance(src, str) and src.startswith(("http://", "https://")):
+                imagem = src
+
+        chave = (titulo.casefold(), round(preco, 2))
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        produtos.append({
+            "id": f"rf-html-{len(produtos)+1}",
+            "name": titulo,
+            "description": descricao,
+            "category": categoria_atual,
+            "image": imagem,
+            "price": preco,
+        })
+
+    return produtos
+
+
+def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
+    """Fallback dirigido ao DOM real da RapidFood."""
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
@@ -102,7 +199,6 @@ def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
             except Exception:
                 pass
 
-            # Carrega cards lazy sem depender de um unico salto para o rodape.
             for frac in (0.20, 0.40, 0.60, 0.80, 1.00):
                 try:
                     page.evaluate(f"window.scrollTo(0, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) * {frac})")
@@ -112,7 +208,7 @@ def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
             page.wait_for_timeout(900)
 
             produtos = page.evaluate(
-                """
+                r"""
                 () => {
                   const money = /R\$\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/i;
                   const isProductUrl = s => {
@@ -201,19 +297,27 @@ def probe_rapidfood_publico(url: str, timeout: int = 25) -> List[Tuple[str, Any]
     if "rapidfood.com.br" not in (url or "").lower():
         return []
 
-    # 1) caminho mais barato/deterministico: HTML puro.
+    html = ""
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
         r.raise_for_status()
-        produtos = extrair_open_product_modal(r.text)
+        html = r.text
+
+        # 1) caminho historico: objetos passados ao modal.
+        produtos = extrair_open_product_modal(html)
         if produtos:
             payload = _normalizar(produtos)
             if len(payload.get("products") or []) >= 3:
                 return [("specialized:rapidfood-openProductModal", payload)]
+
+        # 2) caminho atual: HTML server-side com h2/h3/preco.
+        semanticos = extrair_cards_semanticos_html(html)
+        if len(semanticos) >= 5:
+            return [("specialized:rapidfood-semantic-html", {"products": semanticos})]
     except Exception:
         pass
 
-    # 2) pagina atual pode montar os cards apenas apos renderizacao.
+    # 3) ultimo recurso: pagina montada apenas depois da renderizacao.
     payload = _probe_cards_renderizados(url, timeout=timeout)
     if len(payload.get("products") or []) >= 5:
         return [("specialized:rapidfood-product-images-dom", payload)]
