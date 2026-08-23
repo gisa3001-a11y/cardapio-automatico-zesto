@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Dict, List, Tuple
 
 
@@ -90,6 +91,11 @@ def _coletar_documentos_firestore(value: Any, out: List[Dict[str, Any]], depth: 
                 _coletar_documentos_firestore(v, out, depth + 1)
 
 
+def _contar_docs_colecao(documentos: List[Dict[str, Any]], colecao: str) -> int:
+    marcador = f"/{colecao.strip('/')}/".lower()
+    return sum(1 for d in documentos if marcador in str(d.get("_firestore_document") or "").lower())
+
+
 def probe_lojamenu_firestore(url: str, timeout_ms: int = 35000) -> List[Tuple[str, Any]]:
     if "loja.menu" not in (url or "").lower():
         return []
@@ -129,7 +135,23 @@ def probe_lojamenu_firestore(url: str, timeout_ms: int = 35000) -> List[Tuple[st
                 page.wait_for_load_state("networkidle", timeout=12000)
             except Exception:
                 pass
-            page.wait_for_timeout(2500)
+
+            # O Loja.Menu consulta primeiro a loja e depois abre streams para produtos
+            # e categorias. Fechar a pagina apos um tempo fixo deixava a captura
+            # oscilando. Agora aguardamos o fluxo de produtos aparecer e estabilizar.
+            inicio = time.monotonic()
+            ultimo_total = len(documentos)
+            ultima_mudanca = inicio
+            while (time.monotonic() - inicio) * 1000 < max(12000, timeout_ms):
+                page.wait_for_timeout(500)
+                total = len(documentos)
+                if total != ultimo_total:
+                    ultimo_total = total
+                    ultima_mudanca = time.monotonic()
+                qtd_produtos = _contar_docs_colecao(documentos, "produtos")
+                if qtd_produtos >= 5 and time.monotonic() - ultima_mudanca >= 4.0:
+                    break
+
             browser.close()
     except Exception:
         return []
