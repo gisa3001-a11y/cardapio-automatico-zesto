@@ -2,8 +2,9 @@
 
 Tenta primeiro os objetos openProductModal(...) presentes no HTML. Como a
 pagina publica tambem entrega nome, preco e categoria no HTML renderizado pelo
-servidor, existe um segundo caminho deterministico por headings/price. So depois
-disso usamos Playwright. Nao gera XLSX.
+servidor, existe um segundo caminho deterministico por headings/price. Se o
+servidor nao entregar os cards completos, o navegador repete a mesma leitura
+semantica no DOM renderizado. Nao gera XLSX.
 """
 from __future__ import annotations
 
@@ -91,12 +92,7 @@ def _texto_limpo(tag: Tag | None) -> str:
 
 
 def extrair_cards_semanticos_html(html: str) -> List[Dict[str, Any]]:
-    """Extrai produtos do HTML publico sem depender de classes CSS.
-
-    O RapidFood publica categorias em h2 e produtos em h3. Para cada h3,
-    procuramos um ancestral pequeno que contenha preco em R$ e um sinal de acao
-    de produto. Isso evita capturar totais, fretes ou o carrinho.
-    """
+    """Extrai produtos do HTML publico sem depender de classes CSS."""
     soup = BeautifulSoup(html or "", "html.parser")
     produtos: List[Dict[str, Any]] = []
     vistos = set()
@@ -125,7 +121,6 @@ def extrair_cards_semanticos_html(html: str) -> List[Dict[str, Any]]:
             if len(texto) > 2200:
                 break
             if MONEY_RE.search(texto):
-                # Sinal conservador de produto: botao/link de adicionar, ou imagem
                 acao = any(
                     re.search(r"adicionar|add(?: to cart)?|comprar", _texto_limpo(x), re.I)
                     for x in card.find_all(["button", "a"], limit=12)
@@ -179,7 +174,7 @@ def extrair_cards_semanticos_html(html: str) -> List[Dict[str, Any]]:
 
 
 def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
-    """Fallback dirigido ao DOM real da RapidFood."""
+    """Fallback pelo DOM real: h2=categoria, h3=produto, ancestral com preco."""
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
@@ -211,73 +206,67 @@ def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
                 r"""
                 () => {
                   const money = /R\$\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/i;
-                  const isProductUrl = s => {
-                    s = (s || '').toLowerCase();
-                    return s.includes('/dashboard/uploads/produtos/') || s.includes('/uploads/produtos/');
-                  };
-                  const imageUrl = el => {
-                    if (!el) return '';
-                    if (el.tagName === 'IMG') {
-                      const s = el.currentSrc || el.src || '';
-                      return isProductUrl(s) ? s : '';
-                    }
-                    const bg = getComputedStyle(el).backgroundImage || '';
-                    const m = bg.match(/url\(["']?([^"')]+)["']?\)/i);
-                    return m && isProductUrl(m[1]) ? m[1] : '';
-                  };
-
-                  const anchors = [];
-                  for (const el of Array.from(document.querySelectorAll('img,[style],div,span,a,button'))) {
-                    const src = imageUrl(el);
-                    if (src) anchors.push({el, src});
-                    if (anchors.length >= 500) break;
-                  }
-
+                  const bad = new Set([
+                    'cart','carrinho','categories','categorias','store info','informacoes da loja',
+                    'my addresses','meus enderecos','order history','historico de pedidos',
+                    'sign in','entrar','any notes?','observacoes','total'
+                  ]);
+                  const clean = s => (s || '').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();
+                  const headings = Array.from(document.querySelectorAll('h2,h3'));
                   const out = [], seen = new Set();
+                  let category = '';
                   let seq = 1;
-                  const badName = /^(?:adicionar|comprar|ver mais|detalhes|indisponivel|esgotado|carrinho|pedido)$/i;
 
-                  for (const anchor of anchors) {
-                    let card = anchor.el;
-                    let escolhido = null;
-                    for (let i = 0; i < 11 && card; i++, card = card.parentElement) {
-                      const txt = (card.innerText || '').replace(/\u00a0/g, ' ').trim();
-                      if (txt && txt.length <= 1800 && money.test(txt)) {
-                        escolhido = card;
-                        break;
-                      }
+                  for (const h of headings) {
+                    const title = clean(h.innerText);
+                    if (!title) continue;
+                    const low = title.toLowerCase();
+                    if (h.tagName === 'H2') {
+                      if (!bad.has(low) && title.length <= 180) category = title;
+                      continue;
                     }
-                    if (!escolhido) continue;
+                    if (bad.has(low) || title.length < 2 || title.length > 180) continue;
 
-                    const text = (escolhido.innerText || '').replace(/\u00a0/g, ' ').trim();
-                    const prices = Array.from(text.matchAll(/R\$\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/ig));
-                    if (!prices.length) continue;
-                    const raw = prices[prices.length - 1][1];
-                    const price = Number(raw.replace(/\./g, '').replace(',', '.'));
+                    let card = h;
+                    let chosen = null;
+                    for (let depth = 0; depth < 10 && card; depth++, card = card.parentElement) {
+                      const txt = clean(card.innerText);
+                      if (!txt) continue;
+                      if (txt.length > 2600) break;
+                      if (!money.test(txt)) continue;
+                      const hasAction = Array.from(card.querySelectorAll('button,a')).slice(0,16)
+                        .some(x => /adicionar|add(?: to cart)?|comprar/i.test(clean(x.innerText)));
+                      const hasImage = !!card.querySelector('img');
+                      if (hasAction || hasImage) { chosen = card; break; }
+                    }
+                    if (!chosen) continue;
+
+                    const txt = clean(chosen.innerText);
+                    const matches = Array.from(txt.matchAll(/R\$\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/ig));
+                    if (!matches.length) continue;
+                    const raw = matches[0][1];
+                    const price = Number(raw.replace(/\./g,'').replace(',','.'));
                     if (!Number.isFinite(price) || price <= 0 || price > 5000) continue;
 
-                    const titleEl = escolhido.querySelector('h1,h2,h3,h4,h5,h6,[class*="name" i],[class*="nome" i],[class*="title" i],[class*="titulo" i]');
-                    let name = titleEl ? (titleEl.innerText || '').replace(/\s+/g, ' ').trim() : '';
-                    if (!name || money.test(name) || badName.test(name)) {
-                      const lines = text.split(/\n+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
-                      name = lines.find(x => !money.test(x) && x.length >= 3 && x.length <= 160 && !badName.test(x)) || '';
-                    }
-                    name = name.replace(/R\$.*$/i, '').trim();
-                    if (!name || name.length < 3 || name.length > 160 || badName.test(name)) continue;
-
-                    const key = name.toLowerCase() + '|' + price.toFixed(2);
+                    const key = low + '|' + price.toFixed(2);
                     if (seen.has(key)) continue;
                     seen.add(key);
 
-                    let category = '';
-                    let section = escolhido.closest('section,[class*="category" i],[class*="categoria" i],[class*="section" i],[class*="secao" i]');
-                    if (section) {
-                      const h = section.querySelector('h1,h2,h3,h4,h5,h6');
-                      const t = h ? (h.innerText || '').replace(/\s+/g, ' ').trim() : '';
-                      if (t && !money.test(t) && t.length <= 120 && t.toLowerCase() !== name.toLowerCase()) category = t;
+                    let description = '';
+                    const lines = (chosen.innerText || '').split(/\n+/).map(clean).filter(Boolean);
+                    for (const line of lines) {
+                      if (line === title || money.test(line)) continue;
+                      if (/^(?:promo|featured|most ordered|mais pedido|adicionar|add(?: to cart)?|comprar)$/i.test(line)) continue;
+                      if (line.length >= 6 && line.length <= 600) { description = line; break; }
                     }
 
-                    out.push({id: 'rf-dom-' + (seq++), name, price, image: anchor.src, category});
+                    let image = '';
+                    const img = chosen.querySelector('img');
+                    if (img) {
+                      const src = img.currentSrc || img.src || '';
+                      if (/^https?:\/\//i.test(src)) image = src;
+                    }
+                    out.push({id:'rf-dom-'+(seq++), name:title, description, category, image, price});
                     if (out.length >= 250) break;
                   }
                   return out;
@@ -297,28 +286,24 @@ def probe_rapidfood_publico(url: str, timeout: int = 25) -> List[Tuple[str, Any]
     if "rapidfood.com.br" not in (url or "").lower():
         return []
 
-    html = ""
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
         r.raise_for_status()
         html = r.text
 
-        # 1) caminho historico: objetos passados ao modal.
         produtos = extrair_open_product_modal(html)
         if produtos:
             payload = _normalizar(produtos)
             if len(payload.get("products") or []) >= 3:
                 return [("specialized:rapidfood-openProductModal", payload)]
 
-        # 2) caminho atual: HTML server-side com h2/h3/preco.
         semanticos = extrair_cards_semanticos_html(html)
         if len(semanticos) >= 5:
             return [("specialized:rapidfood-semantic-html", {"products": semanticos})]
     except Exception:
         pass
 
-    # 3) ultimo recurso: pagina montada apenas depois da renderizacao.
     payload = _probe_cards_renderizados(url, timeout=timeout)
     if len(payload.get("products") or []) >= 5:
-        return [("specialized:rapidfood-product-images-dom", payload)]
+        return [("specialized:rapidfood-semantic-dom", payload)]
     return []
