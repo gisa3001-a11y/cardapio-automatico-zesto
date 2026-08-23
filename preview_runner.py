@@ -81,9 +81,15 @@ def _avaliar_opcoes(opcoes):
 def _probe_http_especifico(url: str, timeout: int):
     """Probes sem navegador para plataformas cuja estrutura ja e conhecida."""
     try:
-        if "rapidfood.com.br" in (url or "").lower():
+        low = (url or "").lower()
+        if "rapidfood.com.br" in low:
             from rapidfood_public_probe import probe_rapidfood_publico
             opcoes = probe_rapidfood_publico(url, timeout=timeout)
+            melhor, fonte = _avaliar_opcoes(opcoes)
+            return melhor, fonte, ""
+        if "loja.menu" in low:
+            from lojamenu_public_probe import probe_lojamenu_publico
+            opcoes = probe_lojamenu_publico(url, timeout=timeout)
             melhor, fonte = _avaliar_opcoes(opcoes)
             return melhor, fonte, ""
         return None, "", ""
