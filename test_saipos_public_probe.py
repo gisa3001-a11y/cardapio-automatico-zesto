@@ -3,7 +3,10 @@ from saipos_public_probe import _converter_view_data, _primeiro_id_loja
 
 def test_primeiro_id_loja_variantes():
     assert _primeiro_id_loja([{"id_store": 123}]) == "123"
-    assert _primeiro_id_loja({"data": [{"id": "abc"}]}) == "abc"
+    assert _primeiro_id_loja({"data": [{"id": "abc", "domain_name": "loja.saipos.com"}]}) == "abc"
+    assert _primeiro_id_loja({"result": {"content": {"stores": [{"store_id": 456}]}}}) == "456"
+    # Nao deve capturar um `id` generico de wrapper sem sinais de loja.
+    assert _primeiro_id_loja({"data": {"id": "wrapper", "meta": {"page": 1}}}) == ""
 
 
 def test_converter_view_data_produto_e_adicional():
@@ -43,3 +46,24 @@ def test_converter_view_data_produto_e_adicional():
     assert p["category"] == "Lanches"
     assert p["option_groups"][0]["options"][0]["name"] == "Bacon"
     assert p["option_groups"][0]["options"][0]["price"] == 3.5
+
+
+def test_converter_view_data_aceita_wrapper_data():
+    payload = {
+        "data": {
+            "items": [
+                {
+                    "id_store_item": 9,
+                    "desc_store_item": "Prato do dia",
+                    "category_item": {"enabled": "Y", "desc_store_category_item": "Executivos"},
+                    "variations": [{"enabled": "Y", "price": 29.9}],
+                    "choices": [],
+                }
+            ],
+            "choices": [],
+        }
+    }
+    out = _converter_view_data(payload)
+    assert len(out["products"]) == 1
+    assert out["products"][0]["name"] == "Prato do dia"
+    assert out["products"][0]["price"] == 29.9
