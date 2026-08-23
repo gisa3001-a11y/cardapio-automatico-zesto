@@ -19,23 +19,52 @@ HEADERS = {
 }
 
 
-def _primeiro_id_loja(data: Any):
-    candidatos = []
-    if isinstance(data, list):
-        candidatos = data
-    elif isinstance(data, dict):
-        for k in ("data", "stores", "items", "results"):
-            if isinstance(data.get(k), list):
-                candidatos = data[k]
-                break
-        if not candidatos:
-            candidatos = [data]
-    for loja in candidatos:
-        if not isinstance(loja, dict):
-            continue
-        for k in ("id_store", "id", "store_id", "idStore"):
-            if loja.get(k) is not None:
-                return str(loja.get(k))
+STORE_HINTS = {
+    "domain_name", "store_name", "name_store", "desc_store", "slug", "is_table_module",
+    "id_store", "store_id", "idStore",
+}
+
+
+def _parece_loja(obj: Dict[str, Any]) -> bool:
+    chaves = {str(k) for k in obj.keys()}
+    if chaves & {"id_store", "store_id", "idStore"}:
+        return True
+    # Um campo generico `id` so e aceito quando o mesmo objeto tem sinais claros
+    # de cadastro de loja. Isso evita pegar IDs de wrappers, paginacao ou filtros.
+    return "id" in chaves and len(chaves & STORE_HINTS) >= 1
+
+
+def _primeiro_id_loja(data: Any, depth: int = 0):
+    """Localiza um ID de loja mesmo quando a API envolve o resultado em wrappers.
+
+    A resposta publica do Saipos mudou de formato ao longo do tempo (lista direta,
+    data/results/stores e wrappers aninhados). A busca e deliberadamente limitada e
+    so aceita `id` generico em objetos com sinais de loja.
+    """
+    if depth > 8:
+        return ""
+    if isinstance(data, dict):
+        if _parece_loja(data):
+            for k in ("id_store", "store_id", "idStore", "id"):
+                if data.get(k) not in (None, ""):
+                    return str(data.get(k))
+        # Prioriza wrappers comuns antes de percorrer os demais campos.
+        for k in ("data", "stores", "items", "results", "result", "content", "payload"):
+            if k in data:
+                achado = _primeiro_id_loja(data.get(k), depth + 1)
+                if achado:
+                    return achado
+        for v in data.values():
+            if isinstance(v, (dict, list)):
+                achado = _primeiro_id_loja(v, depth + 1)
+                if achado:
+                    return achado
+    elif isinstance(data, list):
+        for v in data[:100]:
+            if isinstance(v, (dict, list)):
+                achado = _primeiro_id_loja(v, depth + 1)
+                if achado:
+                    return achado
     return ""
 
 
@@ -53,7 +82,27 @@ def _to_float(v: Any) -> float:
         return 0.0
 
 
+def _raiz_view_data(data: Any) -> Dict[str, Any]:
+    """Desembrulha somente wrappers conhecidos ate achar items/choices."""
+    atual = data
+    for _ in range(7):
+        if not isinstance(atual, dict):
+            return {}
+        if isinstance(atual.get("items"), list) or isinstance(atual.get("choices"), list):
+            return atual
+        proximo = None
+        for k in ("data", "result", "content", "payload", "view_data", "viewData"):
+            if isinstance(atual.get(k), dict):
+                proximo = atual.get(k)
+                break
+        if proximo is None:
+            return atual
+        atual = proximo
+    return atual if isinstance(atual, dict) else {}
+
+
 def _converter_view_data(data: Any) -> Dict[str, Any]:
+    data = _raiz_view_data(data)
     if not isinstance(data, dict):
         return {"products": []}
 
