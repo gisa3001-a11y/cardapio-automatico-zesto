@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, List
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 CASOS = [
     ("RapidFood", "https://rapidfood.com.br/panelamineira"),
@@ -29,7 +29,7 @@ PALAVRAS = (
 def _where_summary(node: Any, out: List[Dict[str, Any]] | None = None):
     if out is None:
         out = []
-    if len(out) >= 20:
+    if len(out) >= 30:
         return out
     if isinstance(node, dict):
         ff = node.get("fieldFilter")
@@ -37,8 +37,7 @@ def _where_summary(node: Any, out: List[Dict[str, Any]] | None = None):
             field = ((ff.get("field") or {}).get("fieldPath") if isinstance(ff.get("field"), dict) else None)
             op = ff.get("op")
             value = ff.get("value") if isinstance(ff.get("value"), dict) else {}
-            tipo = next((k for k in ("stringValue", "integerValue", "booleanValue", "doubleValue", "nullValue") if k in value), None)
-            # Nao grava o valor literal; apenas o tipo, para diagnostico estrutural.
+            tipo = next((k for k in ("stringValue", "integerValue", "booleanValue", "doubleValue", "nullValue", "referenceValue") if k in value), None)
             out.append({"field": field, "op": op, "value_type": tipo})
         for v in node.values():
             if isinstance(v, (dict, list)):
@@ -50,35 +49,119 @@ def _where_summary(node: Any, out: List[Dict[str, Any]] | None = None):
     return out
 
 
+def _query_summary(data: Any) -> Dict[str, Any]:
+    """Resume uma consulta Firestore sem registrar valores literais."""
+    if not isinstance(data, dict):
+        return {}
+
+    # REST runQuery.
+    sq = data.get("structuredQuery") if isinstance(data.get("structuredQuery"), dict) else None
+
+    # WebChannel/Listen costuma encapsular target.query.structuredQuery.
+    if sq is None:
+        target = data.get("target") if isinstance(data.get("target"), dict) else {}
+        query = target.get("query") if isinstance(target.get("query"), dict) else {}
+        sq = query.get("structuredQuery") if isinstance(query.get("structuredQuery"), dict) else None
+
+    # Alguns envelopes possuem addTarget/query.
+    if sq is None:
+        add = data.get("addTarget") if isinstance(data.get("addTarget"), dict) else {}
+        query = add.get("query") if isinstance(add.get("query"), dict) else {}
+        sq = query.get("structuredQuery") if isinstance(query.get("structuredQuery"), dict) else None
+
+    if not isinstance(sq, dict):
+        return {}
+
+    out: Dict[str, Any] = {}
+    colecoes = []
+    for frm in sq.get("from") or []:
+        if isinstance(frm, dict) and frm.get("collectionId"):
+            colecoes.append(str(frm.get("collectionId")))
+    if colecoes:
+        out["collections"] = colecoes
+    wh = _where_summary(sq.get("where"))
+    if wh:
+        out["where"] = wh
+    if sq.get("limit") is not None:
+        out["limit"] = sq.get("limit")
+    order = []
+    for ob in sq.get("orderBy") or []:
+        if isinstance(ob, dict):
+            field = ((ob.get("field") or {}).get("fieldPath") if isinstance(ob.get("field"), dict) else None)
+            order.append({"field": field, "direction": ob.get("direction")})
+    if order:
+        out["order_by"] = order
+    return out
+
+
+def _json_candidates_from_form(post_data: str) -> List[Any]:
+    """Extrai somente envelopes JSON de POST form-urlencoded do WebChannel."""
+    out: List[Any] = []
+    try:
+        form = parse_qs(post_data, keep_blank_values=True)
+    except Exception:
+        return out
+    for values in form.values():
+        for raw in values:
+            s = (raw or "").strip()
+            if not s or s[0] not in "[{":
+                continue
+            try:
+                obj = json.loads(s)
+            except Exception:
+                continue
+            out.append(obj)
+            # WebChannel frequentemente usa uma lista contendo o envelope na segunda posicao.
+            if isinstance(obj, list):
+                for item in obj:
+                    if isinstance(item, (dict, list)):
+                        out.append(item)
+    return out
+
+
+def _walk_query_summaries(node: Any, out: List[Dict[str, Any]] | None = None):
+    if out is None:
+        out = []
+    if len(out) >= 20:
+        return out
+    if isinstance(node, dict):
+        s = _query_summary(node)
+        if s and s not in out:
+            out.append(s)
+        for v in node.values():
+            if isinstance(v, (dict, list)):
+                _walk_query_summaries(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            if isinstance(v, (dict, list)):
+                _walk_query_summaries(v, out)
+    return out
+
+
 def _resumo_post(url: str, post_data: str) -> Dict[str, Any]:
     if not post_data:
         return {}
     try:
         data = json.loads(post_data)
     except Exception:
-        return {"post_json": False, "post_len": len(post_data)}
+        out: Dict[str, Any] = {"post_json": False, "post_len": len(post_data)}
+        if "firestore.googleapis.com" in url:
+            summaries: List[Dict[str, Any]] = []
+            for obj in _json_candidates_from_form(post_data):
+                _walk_query_summaries(obj, summaries)
+            if summaries:
+                out["firestore_queries"] = summaries
+        return out
 
     out: Dict[str, Any] = {"post_json": True}
-    if "firestore.googleapis.com" in url and isinstance(data, dict):
-        sq = data.get("structuredQuery") if isinstance(data.get("structuredQuery"), dict) else {}
-        colecoes = []
-        for frm in sq.get("from") or []:
-            if isinstance(frm, dict) and frm.get("collectionId"):
-                colecoes.append(str(frm.get("collectionId")))
-        if colecoes:
-            out["collections"] = colecoes
-        wh = _where_summary(sq.get("where"))
-        if wh:
-            out["where"] = wh
-        if sq.get("limit") is not None:
-            out["limit"] = sq.get("limit")
-        order = []
-        for ob in sq.get("orderBy") or []:
-            if isinstance(ob, dict):
-                field = ((ob.get("field") or {}).get("fieldPath") if isinstance(ob.get("field"), dict) else None)
-                order.append({"field": field, "direction": ob.get("direction")})
-        if order:
-            out["order_by"] = order
+    if "firestore.googleapis.com" in url:
+        summaries: List[Dict[str, Any]] = []
+        _walk_query_summaries(data, summaries)
+        if summaries:
+            out["firestore_queries"] = summaries
+            # Compatibilidade com os relatórios anteriores quando há uma só consulta.
+            if len(summaries) == 1:
+                out.update(summaries[0])
     return out
 
 
