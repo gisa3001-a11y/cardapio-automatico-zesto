@@ -76,3 +76,14 @@ def test_parser_oficial_pode_validar_cardapio_legitimo_com_dois_itens():
     v=validar_previa(produtos,[],[],"alta",min_produtos=2)
     assert v.aprovado is True
     assert v.score >= 85
+
+
+def test_ausencia_de_fotos_gera_alerta_mas_nao_bloqueia_estrutura_coerente():
+    produtos=[
+        {"codigo":str(i),"nome":f"Item {i}","preco":20+i,"grupos":[],"imagem":"","categoria":"Lanches"}
+        for i in range(10)
+    ]
+    v=validar_previa(produtos,[],[],"alta")
+    assert v.aprovado is True
+    assert v.score >= 85
+    assert any("foto" in a.lower() or "imagem" in a.lower() for a in v.avisos)
