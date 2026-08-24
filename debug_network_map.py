@@ -3,6 +3,8 @@
 Registra somente metadados de requisicoes publicas carregadas pela pagina:
 URL, metodo, tipo, status e, no Firestore, nome da colecao/consulta. Nao salva
 corpo completo de cardapio, cookies, cabecalhos de autenticacao ou dados privados.
+Tambem registra metadados estruturais do DOM (tags/classes/contagens), sem
+persistir textos dos produtos, para diagnosticar paginas server-rendered.
 """
 from __future__ import annotations
 
@@ -50,28 +52,19 @@ def _where_summary(node: Any, out: List[Dict[str, Any]] | None = None):
 
 
 def _query_summary(data: Any) -> Dict[str, Any]:
-    """Resume uma consulta Firestore sem registrar valores literais."""
     if not isinstance(data, dict):
         return {}
-
-    # REST runQuery.
     sq = data.get("structuredQuery") if isinstance(data.get("structuredQuery"), dict) else None
-
-    # WebChannel/Listen costuma encapsular target.query.structuredQuery.
     if sq is None:
         target = data.get("target") if isinstance(data.get("target"), dict) else {}
         query = target.get("query") if isinstance(target.get("query"), dict) else {}
         sq = query.get("structuredQuery") if isinstance(query.get("structuredQuery"), dict) else None
-
-    # Alguns envelopes possuem addTarget/query.
     if sq is None:
         add = data.get("addTarget") if isinstance(data.get("addTarget"), dict) else {}
         query = add.get("query") if isinstance(add.get("query"), dict) else {}
         sq = query.get("structuredQuery") if isinstance(query.get("structuredQuery"), dict) else None
-
     if not isinstance(sq, dict):
         return {}
-
     out: Dict[str, Any] = {}
     colecoes = []
     for frm in sq.get("from") or []:
@@ -95,7 +88,6 @@ def _query_summary(data: Any) -> Dict[str, Any]:
 
 
 def _json_candidates_from_form(post_data: str) -> List[Any]:
-    """Extrai somente envelopes JSON de POST form-urlencoded do WebChannel."""
     out: List[Any] = []
     try:
         form = parse_qs(post_data, keep_blank_values=True)
@@ -111,7 +103,6 @@ def _json_candidates_from_form(post_data: str) -> List[Any]:
             except Exception:
                 continue
             out.append(obj)
-            # WebChannel frequentemente usa uma lista contendo o envelope na segunda posicao.
             if isinstance(obj, list):
                 for item in obj:
                     if isinstance(item, (dict, list)):
@@ -152,14 +143,12 @@ def _resumo_post(url: str, post_data: str) -> Dict[str, Any]:
             if summaries:
                 out["firestore_queries"] = summaries
         return out
-
     out: Dict[str, Any] = {"post_json": True}
     if "firestore.googleapis.com" in url:
         summaries: List[Dict[str, Any]] = []
         _walk_query_summaries(data, summaries)
         if summaries:
             out["firestore_queries"] = summaries
-            # Compatibilidade com os relatórios anteriores quando há uma só consulta.
             if len(summaries) == 1:
                 out.update(summaries[0])
     return out
@@ -228,16 +217,43 @@ def main():
                         pass
                 final_url = page.url
                 try:
-                    dom = page.evaluate("""
+                    dom = page.evaluate(r"""
                     () => {
-                      const body = (document.body?.innerText || '').replace(/\\s+/g,' ').trim();
+                      const body = (document.body?.innerText || '').replace(/\s+/g,' ').trim();
                       const links = Array.from(document.querySelectorAll('a[href]')).map(a => a.href).filter(Boolean);
+                      const headings = {};
+                      for (const tag of ['h1','h2','h3','h4','h5','h6']) headings[tag] = document.querySelectorAll(tag).length;
+                      const moneyNodes = Array.from(document.querySelectorAll('body *')).filter(el => {
+                        if (el.children.length) return false;
+                        return /R\$\s*[0-9]/i.test((el.textContent || '').trim());
+                      }).slice(0,80);
+                      const moneyStructure = moneyNodes.map(el => {
+                        const chain = [];
+                        let cur = el;
+                        for (let i=0; cur && i<5; i++, cur=cur.parentElement) {
+                          chain.push({
+                            tag: (cur.tagName || '').toLowerCase(),
+                            cls: String(cur.className || '').split(/\s+/).filter(Boolean).slice(0,6),
+                            role: cur.getAttribute ? (cur.getAttribute('role') || '') : '',
+                            has_button: !!(cur.querySelector && cur.querySelector('button,a')),
+                            has_img: !!(cur.querySelector && cur.querySelector('img')),
+                            heading_count: cur.querySelectorAll ? cur.querySelectorAll('h1,h2,h3,h4,h5,h6').length : 0,
+                          });
+                        }
+                        return chain;
+                      });
                       return {
                         title: document.title || '',
                         text_len: body.length,
-                        money_mentions: (body.match(/R\\$/g) || []).length,
+                        money_mentions: (body.match(/R\$/g) || []).length,
                         product_word_mentions: (body.match(/produto|product|card[aá]pio|menu/gi) || []).length,
                         links_relevantes: links.filter(x => /menu|produto|product|cardap|pedido|catalog/i.test(x)).slice(0,80),
+                        headings,
+                        money_leaf_nodes: moneyNodes.length,
+                        money_structure: moneyStructure,
+                        article_count: document.querySelectorAll('article').length,
+                        section_count: document.querySelectorAll('section').length,
+                        button_count: document.querySelectorAll('button').length,
                       };
                     }
                     """)
