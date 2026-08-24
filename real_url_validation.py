@@ -115,7 +115,16 @@ def _resumir(label: str, url: str) -> Dict[str, Any]:
             if resultado is not None:
                 produtos, grupos, pizzas = _dicts_resultado_oficial(resultado)
                 if produtos:
-                    validacao = validar_previa(produtos, grupos, pizzas, "alta").to_dict()
+                    # Parser oficial e evidencia de plataforma: um cardapio pequeno
+                    # com 2 itens pode ser perfeitamente legitimo. O fallback generico
+                    # continua exigindo pelo menos 3 para evitar falso positivo.
+                    validacao = validar_previa(produtos, grupos, pizzas, "alta", min_produtos=2).to_dict()
+                    avisos_oficiais = list(getattr(resultado, "avisos", []) or [])
+                    for aviso in validacao.get("avisos") or []:
+                        if aviso not in avisos_oficiais:
+                            avisos_oficiais.append(aviso)
+                    if validacao.get("erros"):
+                        avisos_oficiais.append("Validacao tecnica: " + "; ".join(validacao["erros"][:4]))
                     item.update({
                         "status": "ok",
                         "url_final": det.url_normalizada,
@@ -131,7 +140,7 @@ def _resumir(label: str, url: str) -> Dict[str, Any]:
                         "score_validacao": validacao.get("score", 0),
                         "validacao_aprovada": bool(validacao.get("aprovado")),
                         "elegivel_para_teste_xlsx": bool(validacao.get("aprovado")),
-                        "avisos": list(getattr(resultado, "avisos", []) or [])[:10],
+                        "avisos": avisos_oficiais[:10],
                         "erro": None,
                     })
                     return item
