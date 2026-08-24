@@ -79,10 +79,16 @@ def validar_previa(produtos: List[Dict[str, Any]], grupos: List[Dict[str, Any]],
             avisos.append(f"{zeros_estruturados} produto(s) com preco base zero possuem preco estruturado em grupo/pizza.")
     else: erros.append("Muitos produtos ainda estao com preco zero sem resolucao estrutural.")
 
+    # Foto e importante para qualidade do cadastro, mas a ausencia dela nao torna
+    # nome/preco/categoria estruturalmente invalidos. Mantemos alerta explicito e
+    # uma pontuacao parcial para nao transformar cardapios sem foto em falha tecnica.
     imagens=sum(1 for p in produtos if _url_http(str(p.get("imagem","") or "")))
-    if total and imagens/total >= .5: score += 10
-    elif imagens: score += 5; avisos.append("Parte dos produtos nao possui imagem valida.")
-    else: avisos.append("Nenhuma imagem valida foi confirmada.")
+    if total and imagens/total >= .5:
+        score += 10
+    elif imagens:
+        score += 5; avisos.append("Parte dos produtos nao possui imagem valida.")
+    else:
+        score += 5; avisos.append("Nenhuma imagem valida foi confirmada; exportacao deve sinalizar fotos ausentes.")
 
     ids_prod={str(p.get("codigo","") or "") for p in produtos}
     referencias_invalidas=0
