@@ -236,9 +236,11 @@ def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
+            # IMPORTANTE: manter o user-agent nativo do Chromium. O diagnostico real
+            # abre o RapidFood dessa forma; forcar um UA Windows sobre Chromium Linux
+            # gera client-hints inconsistentes e a pagina pode entregar DOM diferente.
             page = browser.new_page(
                 locale="pt-BR",
-                user_agent=HEADERS["User-Agent"],
                 viewport={"width": 1440, "height": 1200},
             )
             page.goto(url, wait_until="domcontentloaded", timeout=max(15000, timeout * 1000))
@@ -254,8 +256,6 @@ def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
                     pass
             page.wait_for_timeout(900)
 
-            # Caminho principal no navegador: reaproveita o mesmo parser semantico
-            # sobre o HTML FINAL, depois que JS/lazy-load terminaram.
             try:
                 html_renderizado = page.content()
                 semanticos = extrair_cards_semanticos_html(html_renderizado)
@@ -265,7 +265,6 @@ def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
                 browser.close()
                 return {"products": semanticos}
 
-            # Ultimo fallback: usa texto visivel de cada h3 no DOM.
             produtos = page.evaluate(r"""
             () => {
               const money = /R\$\s*([0-9]{1,5}(?:[.,][0-9]{2})?)/i;
