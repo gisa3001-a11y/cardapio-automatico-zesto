@@ -1,12 +1,12 @@
 """Gate de prontidao do Leitor Universal V2.
 
-Le o relatorio real e o mapa de rede para separar duas coisas diferentes:
-- falha confirmada do leitor em uma pagina que realmente expoe catalogo;
+Le o relatorio real, o mapa de rede e o probe profundo para separar:
+- falha confirmada do leitor em pagina que realmente expoe catalogo;
 - URL/plataforma sem catalogo testavel no ambiente daquela bateria.
 
-Os percentuais brutos continuam usando TODOS os casos. A classificacao serve apenas
-para evitar que 404, Cloudflare ou pagina sem qualquer evidencia de catalogo sejam
-rotulados como defeito do parser. Mesmo quando pronta, esta rotina nunca faz merge.
+Os percentuais brutos continuam usando TODOS os casos. A classificacao apenas evita
+rotular 404, Cloudflare ou uma fonte publica vazia como defeito do parser.
+Mesmo quando pronta, esta rotina nunca faz merge automaticamente.
 """
 import json
 from pathlib import Path
@@ -24,20 +24,50 @@ def _ler_json(path: Path, default):
     return default
 
 
-def _network_por_caso(network_map):
-    if not isinstance(network_map, list):
+def _por_caso(items):
+    if not isinstance(items, list):
         return {}
-    return {str(x.get("caso") or ""): x for x in network_map if isinstance(x, dict)}
+    return {str(x.get("caso") or ""): x for x in items if isinstance(x, dict)}
 
 
-def classificar_caso_sem_produtos(resultado, network=None):
+def _probe_store_vazio(probe):
+    """True quando a propria resposta publica /v1/stores veio como lista vazia."""
+    for resposta in (probe or {}).get("respostas") or []:
+        fonte = str(resposta.get("fonte") or "")
+        schema = resposta.get("schema") or {}
+        if "/v1/stores" not in fonte:
+            continue
+        if schema.get("tipo") == "list" and int(schema.get("tamanho") or 0) == 0:
+            return True
+    return False
+
+
+def _money_apenas_carrinho(dom):
+    """Evita confundir subtotal/frete/total do carrinho com precos de produtos."""
+    estruturas = dom.get("money_structure") or []
+    if not estruturas:
+        return False
+    classes_carrinho = {
+        "subtotal", "delivery", "total", "totals", "light-total", "dark-total", "bottom"
+    }
+    for cadeia in estruturas:
+        classes = set()
+        for no in cadeia or []:
+            classes.update(str(c).casefold() for c in (no.get("cls") or []))
+        if not (classes & classes_carrinho):
+            return False
+    return True
+
+
+def classificar_caso_sem_produtos(resultado, network=None, probe=None):
     """Classifica um zero sem inventar sucesso.
 
-    Retorna ``(classe, motivo, bloqueia_merge)``.
-    ``bloqueia_merge`` somente e True quando existe evidencia de catalogo acessivel
-    que o leitor deveria ter conseguido interpretar.
+    Retorna ``(classe, motivo, bloqueia_merge)``. ``bloqueia_merge`` somente e True
+    quando existe evidencia real de catalogo acessivel que o leitor deveria ter
+    conseguido interpretar.
     """
     network = network or {}
+    probe = probe or {}
     caso = str(resultado.get("caso") or "")
     plataforma = str(resultado.get("plataforma_detectada") or caso)
     avisos = " ".join(str(x) for x in (resultado.get("avisos") or []))
@@ -65,8 +95,25 @@ def classificar_caso_sem_produtos(resultado, network=None):
             False,
         )
 
-    # Pagina abre, mas nao ha qualquer evidencia de cardapio: sem precos, sem cards
-    # e sem chamadas de dados. Isso e diferente de um parser falhar diante de dados.
+    # Evidencia mais forte para Saipos e casos semelhantes: a propria chamada que
+    # descobre a loja respondeu 200, mas retornou lista vazia. Nao ha store/catalogo
+    # resolvido para o parser consumir naquela bateria.
+    if _probe_store_vazio(probe):
+        return (
+            "fonte-publica-sem-loja",
+            f"{plataforma}: a propria fonte publica de lojas respondeu uma colecao vazia para o dominio testado.",
+            False,
+        )
+
+    # Precos presentes somente em subtotal/frete/total nao contam como evidencia de
+    # cardapio. Isso evita que uma casca de carrinho vazia seja tratada como catalogo.
+    if money > 0 and _money_apenas_carrinho(dom) and product_words <= 1:
+        return (
+            "interface-sem-catalogo-detectavel",
+            f"{plataforma}: os valores visiveis eram apenas subtotal/frete/total do carrinho; nenhum produto foi exposto.",
+            False,
+        )
+
     if doc_status in (None, 200) and money == 0 and total_requests == 0:
         return (
             "sem-catalogo-publico-detectavel",
@@ -74,8 +121,6 @@ def classificar_caso_sem_produtos(resultado, network=None):
             False,
         )
 
-    # Saipos e casos semelhantes podem abrir a interface, mas a API publica usada
-    # pela propria pagina retornar uma colecao vazia para aquela loja/dominio.
     api_store_ok = any(
         int(r.get("status") or 0) == 200 and "/v1/stores" in str(r.get("path") or "")
         for r in requests
@@ -87,9 +132,9 @@ def classificar_caso_sem_produtos(resultado, network=None):
             False,
         )
 
-    # Se ha precos/produtos visiveis ou trafego de catalogo e ainda assim saiu zero,
-    # este sim e um defeito que deve impedir a consideracao de merge.
-    if money > 0 or product_words > 1 or total_requests > 1:
+    # Aqui sim existe evidencia positiva de catalogo. Nesse caso zero produtos e
+    # defeito do leitor e deve bloquear a etapa seguinte.
+    if money > 0 or product_words > 1:
         return (
             "falha-leitor-confirmada",
             f"{plataforma}: havia evidencia de catalogo acessivel, mas o leitor retornou zero produtos.",
@@ -103,7 +148,7 @@ def classificar_caso_sem_produtos(resultado, network=None):
     )
 
 
-def avaliar_readiness(report, network_map=None):
+def avaliar_readiness(report, network_map=None, probe_map=None):
     total = int(report.get("total_casos") or 0)
     com_produtos = int(report.get("com_produtos") or 0)
     aprovados = int(report.get("aprovados_validacao") or 0)
@@ -120,13 +165,17 @@ def avaliar_readiness(report, network_map=None):
             f"Aprovacao tecnica {taxa_aprovacao:.0%} abaixo do minimo de {MIN_APROVACAO:.0%}."
         )
 
-    net = _network_por_caso(network_map or [])
+    net = _por_caso(network_map or [])
+    probes = _por_caso(probe_map or [])
     indisponiveis = []
     falhas_leitor = []
     for r in report.get("resultados", []):
         if int(r.get("produtos", 0) or 0) != 0:
             continue
-        classe, motivo, bloqueia = classificar_caso_sem_produtos(r, net.get(str(r.get("caso") or "")))
+        caso = str(r.get("caso") or "")
+        classe, motivo, bloqueia = classificar_caso_sem_produtos(
+            r, net.get(caso), probes.get(caso)
+        )
         item = {"caso": r.get("caso"), "classe": classe, "motivo": motivo}
         if bloqueia:
             falhas_leitor.append(item)
@@ -168,7 +217,8 @@ def main():
     else:
         report = _ler_json(origem, {})
         network_map = _ler_json(Path("artifacts/network_map.json"), [])
-        payload = avaliar_readiness(report, network_map)
+        probe_map = _ler_json(Path("artifacts/probe_endpoints.json"), [])
+        payload = avaliar_readiness(report, network_map, probe_map)
 
     Path("artifacts").mkdir(exist_ok=True)
     Path("artifacts/readiness.json").write_text(
