@@ -15,6 +15,7 @@ V2.7:
 from dataclasses import dataclass
 import hashlib
 import json
+import shutil
 from typing import Any, List, Tuple
 
 
@@ -181,7 +182,30 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
     vistos_dom = set()
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+                       chromium_sistema = (
+                shutil.which("chromium")
+                or shutil.which("chromium-browser")
+                or shutil.which("google-chrome")
+                or shutil.which("google-chrome-stable")
+            )
+
+            if chromium_sistema:
+                browser = p.chromium.launch(
+                    headless=True,
+                    executable_path=chromium_sistema,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                    ],
+                )
+            else:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                    ],
+                )
             page = browser.new_page(
                 locale="pt-BR",
                 user_agent=(
