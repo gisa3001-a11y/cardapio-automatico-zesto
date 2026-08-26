@@ -180,7 +180,7 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
     payloads: List[Tuple[str, Any]] = []
     vistos = set()
     vistos_dom = set()
-        try:
+    try:
         with sync_playwright() as p:
             chromium_sistema = (
                 shutil.which("chromium")
