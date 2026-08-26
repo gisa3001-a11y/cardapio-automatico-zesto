@@ -1,0 +1,114 @@
+name: Teste Leitor Universal V2
+
+on:
+  push:
+    branches:
+      - leitor-universal-v2
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.py"
+      - ".github/workflows/test-universal-v2.yml"
+  workflow_dispatch:
+
+jobs:
+  test-universal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 openpyxl pytest playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Compilar modulos V2
+        run: |
+          python -m py_compile app.py
+          python -m py_compile universal_router.py
+          python -m py_compile structure_detector.py
+          python -m py_compile generic_preview.py
+          python -m py_compile platform_payload_adapters.py
+          python -m py_compile platform_specialized_probe.py
+          python -m py_compile rapidfood_public_probe.py
+          python -m py_compile saipos_public_probe.py
+          python -m py_compile price_resolution.py
+          python -m py_compile pizza_rules.py
+          python -m py_compile universal_validation.py
+          python -m py_compile universal_export.py
+          python -m py_compile universal_integration.py
+          python -m py_compile universal_app_bridge.py
+          python -m py_compile browser_probe.py
+          python -m py_compile preview_runner.py
+          python -m py_compile real_url_validation.py
+          python -m py_compile real_url_validation_parallel.py
+          python -m py_compile debug_probe_urls.py
+          python -m py_compile debug_network_map.py
+          python -m py_compile universal_readiness.py
+
+      - name: Testes offline V2
+        run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_platform_payload_adapters.py test_platform_specialized_probe.py test_rapidfood_public_probe.py test_saipos_public_probe.py test_pizza_rules.py test_universal_price_validation.py test_universal_readiness.py test_universal_export.py test_universal_integration.py test_universal_app_bridge.py test_universal_xlsx_e2e.py
+
+      - name: Diagnostico profundo dos endpoints pendentes
+        continue-on-error: true
+        run: python debug_probe_urls.py
+
+      - name: Mapa de rede dos casos pendentes
+        continue-on-error: true
+        run: python debug_network_map.py
+
+      - name: Publicar probe antecipado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leitor-universal-v2-probe-profundo
+          path: |
+            artifacts/probe_endpoints.json
+            artifacts/network_map.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Validacao controlada de URLs reais
+        continue-on-error: true
+        run: python real_url_validation_parallel.py
+
+      - name: Avaliar prontidao da V2
+        if: always()
+        run: python universal_readiness.py
+
+      - name: Publicar relatorios da bateria real
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leitor-universal-v2-relatorio-real
+          path: |
+            artifacts/real_url_report.json
+            artifacts/real_url_report.md
+            artifacts/probe_endpoints.json
+            artifacts/network_map.json
+            artifacts/readiness.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Garantir isolamento da main
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          assert Path('universal_router.py').exists()
+          assert Path('browser_probe.py').exists()
+          assert Path('platform_specialized_probe.py').exists()
+          assert Path('rapidfood_public_probe.py').exists()
+          assert Path('saipos_public_probe.py').exists()
+          assert Path('universal_integration.py').exists()
+          assert Path('universal_app_bridge.py').exists()
+          print('Camada universal presente somente na branch em teste.')
+          PY
