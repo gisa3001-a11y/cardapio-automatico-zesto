@@ -180,9 +180,9 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
     payloads: List[Tuple[str, Any]] = []
     vistos = set()
     vistos_dom = set()
-    try:
+        try:
         with sync_playwright() as p:
-                       chromium_sistema = (
+            chromium_sistema = (
                 shutil.which("chromium")
                 or shutil.which("chromium-browser")
                 or shutil.which("google-chrome")
@@ -206,6 +206,7 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
                         "--disable-dev-shm-usage",
                     ],
                 )
+
             page = browser.new_page(
                 locale="pt-BR",
                 user_agent=(
@@ -224,7 +225,9 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
                     req_type = (resp.request.resource_type or "").lower()
                     ct = (resp.headers.get("content-type") or "").lower()
                     low = resp.url.lower()
-                    if req_type not in ("xhr", "fetch") and any(t in low for t in IGNORAR_URL_TERMS):
+                    if req_type not in ("xhr", "fetch") and any(
+                        t in low for t in IGNORAR_URL_TERMS
+                    ):
                         return
                     chave = _chave_requisicao(resp)
                     if chave in vistos:
@@ -238,20 +241,50 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
                     pass
 
             page.on("response", on_response)
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=timeout_ms,
+            )
+
             try:
-                page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 12000))
+                page.wait_for_load_state(
+                    "networkidle",
+                    timeout=min(timeout_ms, 12000),
+                )
             except Exception:
                 pass
 
-            _coletar_json_dom(page, payloads, vistos_dom, max_payloads)
-            _coletar_cards_visiveis(page, payloads, max_payloads)
+            _coletar_json_dom(
+                page,
+                payloads,
+                vistos_dom,
+                max_payloads,
+            )
+            _coletar_cards_visiveis(
+                page,
+                payloads,
+                max_payloads,
+            )
 
             try:
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.evaluate(
+                    "window.scrollTo(0, document.body.scrollHeight)"
+                )
                 page.wait_for_timeout(1800)
-                _coletar_json_dom(page, payloads, vistos_dom, max_payloads)
-                _coletar_cards_visiveis(page, payloads, max_payloads)
+
+                _coletar_json_dom(
+                    page,
+                    payloads,
+                    vistos_dom,
+                    max_payloads,
+                )
+                _coletar_cards_visiveis(
+                    page,
+                    payloads,
+                    max_payloads,
+                )
+
                 page.evaluate("window.scrollTo(0, 0)")
                 page.wait_for_timeout(700)
             except Exception:
@@ -260,5 +293,6 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
             final_url = page.url
             browser.close()
             return BrowserProbeResult(final_url, payloads)
+
     except Exception as exc:
         return BrowserProbeResult(url, payloads, str(exc))
