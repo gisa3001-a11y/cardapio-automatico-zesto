@@ -3,6 +3,7 @@ name: Teste Leitor Universal V2
 on:
   push:
     branches:
+      - main
       - leitor-universal-v2
   pull_request:
     branches:
@@ -99,7 +100,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Garantir isolamento da main
+      - name: Confirmar camada universal integrada
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -110,5 +111,5 @@ jobs:
           assert Path('saipos_public_probe.py').exists()
           assert Path('universal_integration.py').exists()
           assert Path('universal_app_bridge.py').exists()
-          print('Camada universal presente somente na branch em teste.')
+          print('Camada universal presente e integrada na branch testada.')
           PY
