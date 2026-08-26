@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from typing import Any, Dict, List, Tuple
 
 import requests
@@ -235,7 +236,21 @@ def _probe_cards_renderizados(url: str, timeout: int = 25) -> Dict[str, Any]:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            chromium_sistema = (
+                shutil.which("chromium")
+                or shutil.which("chromium-browser")
+                or shutil.which("google-chrome")
+                or shutil.which("google-chrome-stable")
+            )
+
+            launch_kwargs = {
+                "headless": True,
+                "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+            }
+            if chromium_sistema:
+                launch_kwargs["executable_path"] = chromium_sistema
+
+            browser = p.chromium.launch(**launch_kwargs)
             # IMPORTANTE: manter o user-agent nativo do Chromium. O diagnostico real
             # abre o RapidFood dessa forma; forcar um UA Windows sobre Chromium Linux
             # gera client-hints inconsistentes e a pagina pode entregar DOM diferente.
