@@ -29,7 +29,8 @@ jobs:
       - name: Dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 openpyxl pytest playwright
+          pip install -r requirements.txt
+          pip install pytest
           python -m playwright install --with-deps chromium
 
       - name: Compilar modulos V2
@@ -58,6 +59,30 @@ jobs:
 
       - name: Testes offline V2
         run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_platform_payload_adapters.py test_platform_specialized_probe.py test_rapidfood_public_probe.py test_saipos_public_probe.py test_pizza_rules.py test_universal_price_validation.py test_universal_readiness.py test_universal_export.py test_universal_integration.py test_universal_app_bridge.py test_universal_xlsx_e2e.py
+
+      - name: Smoke test Streamlit
+        run: |
+          streamlit run app.py --server.headless=true --server.port=8501 > /tmp/streamlit.log 2>&1 &
+          APP_PID=$!
+          trap 'kill $APP_PID || true' EXIT
+          python - <<'PY'
+          import time
+          import urllib.request
+
+          url = 'http://127.0.0.1:8501/_stcore/health'
+          ultimo = None
+          for _ in range(30):
+              try:
+                  with urllib.request.urlopen(url, timeout=2) as r:
+                      corpo = r.read().decode('utf-8', 'replace').strip().lower()
+                      if r.status == 200 and 'ok' in corpo:
+                          print('Streamlit respondeu health=ok.')
+                          raise SystemExit(0)
+              except Exception as exc:
+                  ultimo = exc
+              time.sleep(1)
+          raise SystemExit(f'Streamlit não ficou saudável: {ultimo}')
+          PY
 
       - name: Diagnostico profundo dos endpoints pendentes
         continue-on-error: true
