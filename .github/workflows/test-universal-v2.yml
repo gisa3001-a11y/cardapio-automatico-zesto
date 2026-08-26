@@ -33,6 +33,7 @@ jobs:
 
       - name: Compilar modulos V2
         run: |
+          python -m py_compile app.py
           python -m py_compile universal_router.py
           python -m py_compile structure_detector.py
           python -m py_compile generic_preview.py
