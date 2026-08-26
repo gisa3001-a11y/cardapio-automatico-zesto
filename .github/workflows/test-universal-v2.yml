@@ -56,7 +56,7 @@ jobs:
           python -m py_compile universal_readiness.py
 
       - name: Testes offline V2
-        run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_platform_payload_adapters.py test_platform_specialized_probe.py test_rapidfood_public_probe.py test_saipos_public_probe.py test_pizza_rules.py test_universal_price_validation.py test_universal_readiness.py test_universal_export.py test_universal_integration.py test_universal_app_bridge.py
+        run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_platform_payload_adapters.py test_platform_specialized_probe.py test_rapidfood_public_probe.py test_saipos_public_probe.py test_pizza_rules.py test_universal_price_validation.py test_universal_readiness.py test_universal_export.py test_universal_integration.py test_universal_app_bridge.py test_universal_xlsx_e2e.py
 
       - name: Diagnostico profundo dos endpoints pendentes
         continue-on-error: true
