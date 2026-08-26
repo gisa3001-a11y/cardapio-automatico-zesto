@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from fetchers import buscar_por_url, interpretar_html, diagnosticar_rede_universal, detectar_plataforma
+from universal_app_bridge import buscar_com_fallback_universal
 from validator import validar
 from xlsx_writer import gerar_xlsx
 
@@ -100,19 +101,22 @@ with acao1:
     gerar = st.button("Ler cardápio e preparar prévia", type="primary", use_container_width=True)
 with acao2:
     if st.button("Limpar resultado", use_container_width=True):
-        for k in ("resultado", "diagnostico_rede", "resultado_url", "erro"):
+        for k in ("resultado", "diagnostico_rede", "resultado_url", "erro", "motor_leitura"):
             st.session_state.pop(k, None)
         st.rerun()
 
 if gerar:
-    for k in ("resultado", "diagnostico_rede", "resultado_url", "erro"):
+    for k in ("resultado", "diagnostico_rede", "resultado_url", "erro", "motor_leitura"):
         st.session_state.pop(k, None)
     try:
         if modo == "URL automática":
             if not url.strip():
                 raise ValueError("Informe a URL do cardápio.")
             with st.spinner("Lendo produtos, categorias, preços, fotos e adicionais..."):
-                resultado = buscar_por_url(url.strip(), usar_playwright=True)
+                resultado, motor = buscar_com_fallback_universal(
+                    url.strip(), buscar_por_url, usar_playwright=True
+                )
+            st.session_state["motor_leitura"] = motor
             st.session_state["resultado_url"] = url.strip()
             diag = getattr(resultado, "_diagnostico_rede", None)
             if diag:
@@ -122,6 +126,7 @@ if gerar:
                 raise ValueError("Cole o HTML completo para continuar.")
             with st.spinner("Interpretando HTML..."):
                 resultado = interpretar_html(html_manual, origem=url.strip() or "HTML manual")
+            st.session_state["motor_leitura"] = "html-manual"
             st.session_state["resultado_url"] = url.strip() or "HTML manual"
         st.session_state["resultado"] = resultado
     except Exception as exc:
@@ -150,6 +155,10 @@ if resultado:
 
     st.markdown('<div class="section-title">3. Conferência</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-copy">Confira o resumo antes de gerar o arquivo final.</div>', unsafe_allow_html=True)
+
+    motor = st.session_state.get("motor_leitura")
+    if motor == "universal-v2":
+        st.info("O leitor atual não conseguiu concluir esta URL; a leitura foi recuperada pelo Leitor Universal V2 e passou pela validação antes de chegar a esta tela.")
 
     m1,m2,m3,m4,m5 = st.columns(5)
     m1.metric("Produtos", total_produtos)
@@ -200,6 +209,7 @@ if resultado:
     with st.expander("Diagnóstico técnico", expanded=False):
         diag = st.session_state.get("diagnostico_rede")
         origem = getattr(resultado, "origem", "")
+        st.caption(f"Motor de leitura: {st.session_state.get('motor_leitura') or 'não informado'}")
         st.caption(f"Fonte: {origem or 'parser da plataforma'}")
         st.caption(f"URL: {st.session_state.get('resultado_url','')}")
         if diag:
@@ -216,7 +226,7 @@ if resultado:
         try:
             xlsx = gerar_xlsx(template.getvalue(), resultado)
             plataforma = detectar_plataforma(st.session_state.get("resultado_url", "")) or "cardapio"
-            slug = re_safe = "".join(ch if ch.isalnum() else "_" for ch in plataforma.lower()).strip("_")
+            slug = "".join(ch if ch.isalnum() else "_" for ch in plataforma.lower()).strip("_")
             nome = f"cardapio_{slug}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
             st.download_button(
                 "Baixar XLSX para importação",
