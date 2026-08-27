@@ -207,14 +207,21 @@ def coletar_json_publico(url: str, timeout_ms: int = 25000, max_payloads: int = 
                     ],
                 )
 
-            page = browser.new_page(
-                locale="pt-BR",
-                user_agent=(
+            context_kwargs = {
+                "locale": "pt-BR",
+                "viewport": {"width": 1440, "height": 1200},
+            }
+            # RapidFood compara sinais do navegador. No Streamlit, forcar um UA
+            # Windows sobre Chromium Linux cria client-hints inconsistentes e pode
+            # resultar em DOM/bloqueio diferente. Para essa plataforma, mantemos o
+            # user-agent nativo do Chromium instalado no ambiente.
+            if "rapidfood.com.br" not in (url or "").lower():
+                context_kwargs["user_agent"] = (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 Chrome/151 Safari/537.36"
-                ),
-                viewport={"width": 1440, "height": 1200},
-            )
+                )
+
+            page = browser.new_page(**context_kwargs)
 
             def on_response(resp):
                 if len(payloads) >= max_payloads:
