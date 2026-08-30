@@ -29,7 +29,7 @@ CASOS = [
     ("Hubt", "https://www.hubt.com.br/oriental-suzano/"),
     ("MenuDino", "https://pollolokoouroverde.menudino.com/"),
     ("Neemo", "https://loja.neemo.com.br/braseiro-choperia-e-espetaria"),
-    ("Ola Click", "https://tatys-burger-2.ola.click/products"),
+    ("Ola Click", "https://eloni-bistro.ola.click/products"),
     ("Cardapio Web", "https://app.cardapioweb.com/shakepoint_westplaza"),
     ("EntregueJa", "https://vemdeburger.entregueja.com.br/home"),
     ("Saipos", "https://temperodaleia.saipos.com/"),
