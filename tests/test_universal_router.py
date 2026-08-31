@@ -1,6 +1,7 @@
 import unittest
 
-from universal_router import detectar_url, normalizar_url
+from models import Produto, Resultado
+from universal_router import _sanear_classificacao_anota, detectar_url, normalizar_url
 
 
 class TestUniversalRouter(unittest.TestCase):
@@ -36,6 +37,55 @@ class TestUniversalRouter(unittest.TestCase):
     def test_nao_confunde_dominio_falso(self):
         d = detectar_url("https://brendi.com.br.exemplo.com/cardapio")
         self.assertNotEqual(d.plataforma, "Brendi")
+
+    def test_anota_vinho_sem_evidencia_semantica_nao_fica_como_pizza(self):
+        vinho = Produto(
+            codigo="v1",
+            nome="Vinho Villena 1L",
+            categoria="Vinhos",
+            preco=29.9,
+            pizza=True,
+        )
+        resultado = Resultado(itens=[], pizzas=[vinho], origem="Anota AI")
+
+        saneado = _sanear_classificacao_anota(resultado, "Anota AI")
+
+        self.assertEqual(len(saneado.pizzas), 0)
+        self.assertEqual(len(saneado.itens), 1)
+        self.assertEqual(saneado.itens[0].nome, "Vinho Villena 1L")
+        self.assertFalse(saneado.itens[0].pizza)
+        self.assertTrue(any("reclassificou 1 vinho" in a for a in saneado.avisos))
+
+    def test_anota_nao_reclassifica_item_com_evidencia_real_de_pizza(self):
+        item = Produto(
+            codigo="p1",
+            nome="Pizza com Vinho",
+            categoria="Pizzas",
+            preco=49.9,
+            pizza=True,
+        )
+        resultado = Resultado(itens=[], pizzas=[item], origem="Anota AI")
+
+        saneado = _sanear_classificacao_anota(resultado, "Anota AI")
+
+        self.assertEqual(len(saneado.pizzas), 1)
+        self.assertEqual(len(saneado.itens), 0)
+        self.assertTrue(saneado.pizzas[0].pizza)
+
+    def test_saneamento_anota_nao_altera_outras_plataformas(self):
+        vinho = Produto(
+            codigo="v2",
+            nome="Vinho da Casa",
+            categoria="Vinhos",
+            preco=39.9,
+            pizza=True,
+        )
+        resultado = Resultado(itens=[], pizzas=[vinho], origem="Outra")
+
+        saneado = _sanear_classificacao_anota(resultado, "Ola Click")
+
+        self.assertEqual(len(saneado.pizzas), 1)
+        self.assertEqual(len(saneado.itens), 0)
 
 
 if __name__ == "__main__":
