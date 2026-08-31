@@ -58,6 +58,17 @@ def validar(resultado: Resultado):
             )
         opcoes_vistas.add(chave)
 
+    # Pizza sem método de preço definido não pode ir para o XLSX.
+    # O xlsx_writer grava esse valor diretamente na aba Pizza; portanto 0
+    # significa que ainda não há evidência segura para escolher a regra correta.
+    for p in resultado.pizzas:
+        metodo=int(getattr(p, "metodo_preco_pizza", 0) or 0)
+        if metodo == 0:
+            erros.append(
+                f'Pizza "{p.nome}" está sem método de preço definido. '
+                "Confira sabores/tamanhos antes de gerar o XLSX."
+            )
+
     # Auditoria estrita específica do Cardápio Web.
     audit=getattr(resultado,"_cardapioweb_audit",None)
     if audit:
