@@ -24,6 +24,24 @@ def _url_http(v: str) -> bool:
     except Exception:
         return False
 
+def _rotulo_item(item: Dict[str, Any]) -> str:
+    nome=str(item.get("nome","") or "").strip()
+    codigo=str(item.get("codigo","") or "").strip()
+    if nome and codigo:
+        return f"{nome} [{codigo}]"
+    return nome or codigo or "item sem identificacao"
+
+def _resumo_itens(itens: List[str], limite: int = 8) -> str:
+    unicos=[]
+    for item in itens:
+        if item and item not in unicos:
+            unicos.append(item)
+    exibidos=unicos[:limite]
+    texto=", ".join(exibidos)
+    if len(unicos) > limite:
+        texto += f" (+{len(unicos)-limite} outro(s))"
+    return texto
+
 def validar_previa(produtos: List[Dict[str, Any]], grupos: List[Dict[str, Any]], pizzas: List[Dict[str, Any]], confianca: str, min_produtos: int = 3):
     erros=[]; avisos=[]; score=0
     total=len(produtos)
@@ -55,6 +73,7 @@ def validar_previa(produtos: List[Dict[str, Any]], grupos: List[Dict[str, Any]],
     }
 
     precos=[]; zeros=0; zeros_estruturados=0; zeros_pendentes=0
+    zeros_pendentes_itens=[]
     for p in produtos:
         try: v=float(p.get("preco",0) or 0)
         except Exception: v=-1
@@ -68,16 +87,21 @@ def validar_previa(produtos: List[Dict[str, Any]], grupos: List[Dict[str, Any]],
                 zeros_estruturados += 1
             else:
                 zeros_pendentes += 1
+                zeros_pendentes_itens.append(_rotulo_item(p))
         if v < 0 or v > 5000: erros.append(f"Preco fora da faixa esperada: {p.get('nome','item')}")
     if total and zeros_pendentes == 0:
         score += 20
         if zeros_estruturados:
             avisos.append(f"{zeros_estruturados} produto(s) com preco base zero possuem preco estruturado em grupo/pizza.")
     elif zeros_pendentes <= max(1,total//10):
-        score += 8; avisos.append(f"{zeros_pendentes} produto(s) ainda com preco zero sem resolucao estrutural.")
+        score += 8
+        detalhe=_resumo_itens(zeros_pendentes_itens)
+        avisos.append(f"{zeros_pendentes} produto(s) ainda com preco zero sem resolucao estrutural: {detalhe}.")
         if zeros_estruturados:
             avisos.append(f"{zeros_estruturados} produto(s) com preco base zero possuem preco estruturado em grupo/pizza.")
-    else: erros.append("Muitos produtos ainda estao com preco zero sem resolucao estrutural.")
+    else:
+        detalhe=_resumo_itens(zeros_pendentes_itens)
+        erros.append(f"Muitos produtos ainda estao com preco zero sem resolucao estrutural: {detalhe}.")
 
     # Foto e importante para qualidade do cadastro, mas a ausencia dela nao torna
     # nome/preco/categoria estruturalmente invalidos. Mantemos alerta explicito e
@@ -109,9 +133,15 @@ def validar_previa(produtos: List[Dict[str, Any]], grupos: List[Dict[str, Any]],
     if grupos_invalidos == 0: score += 10
     else: erros.append(f"{grupos_invalidos} linha(s) de adicional com regra invalida.")
 
-    pizza_indef=sum(1 for p in pizzas if int(p.get("metodo_preco_pizza",0) or 0) == 0)
+    pizzas_indef_itens=[
+        _rotulo_item(p)
+        for p in pizzas
+        if int(p.get("metodo_preco_pizza",0) or 0) == 0
+    ]
+    pizza_indef=len(pizzas_indef_itens)
     if pizza_indef:
-        erros.append(f"{pizza_indef} pizza(s) ainda sem metodo de preco definido.")
+        detalhe=_resumo_itens(pizzas_indef_itens)
+        erros.append(f"{pizza_indef} pizza(s) ainda sem metodo de preco definido: {detalhe}.")
     else: score += 10
 
     if confianca == "alta": score += 5
@@ -120,4 +150,16 @@ def validar_previa(produtos: List[Dict[str, Any]], grupos: List[Dict[str, Any]],
     aprovado = score >= 85 and not erros
     if aprovado:
         avisos.append("Previa passou pela validacao tecnica; ainda requer teste controlado antes de ir para a main.")
-    return ValidacaoUniversal(aprovado,score,erros,avisos,{"produtos":total,"grupos":len(ids_grupos),"pizzas":len(pizzas),"imagens_validas":imagens,"precos_zero":zeros,"precos_zero_estruturados":zeros_estruturados,"precos_zero_pendentes":zeros_pendentes,"codigos_produto":len(ids_prod)})
+    return ValidacaoUniversal(aprovado,score,erros,avisos,{
+        "produtos":total,
+        "grupos":len(ids_grupos),
+        "pizzas":len(pizzas),
+        "imagens_validas":imagens,
+        "precos_zero":zeros,
+        "precos_zero_estruturados":zeros_estruturados,
+        "precos_zero_pendentes":zeros_pendentes,
+        "precos_zero_pendentes_itens":zeros_pendentes_itens,
+        "pizzas_metodo_indefinido":pizza_indef,
+        "pizzas_metodo_indefinido_itens":pizzas_indef_itens,
+        "codigos_produto":len(ids_prod),
+    })
