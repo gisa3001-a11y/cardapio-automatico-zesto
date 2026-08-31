@@ -106,3 +106,14 @@ def test_xlsx_gerado_nao_cria_formulas_ou_hyperlinks():
                 assert cell.hyperlink is None
                 if isinstance(cell.value, str):
                     assert not cell.value.startswith("=")
+
+
+def test_pizza_sem_metodo_de_preco_bloqueia_xlsx_no_validador():
+    previa = _previa_aprovada()
+    previa.produtos[1]["metodo_preco_pizza"] = 0
+    previa.pizzas[0]["metodo_preco_pizza"] = 0
+
+    resultado = converter_previa_para_resultado(previa)
+    erros, _avisos = validar(resultado)
+
+    assert any("sem método de preço definido" in erro for erro in erros)
