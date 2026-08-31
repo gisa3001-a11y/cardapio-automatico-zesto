@@ -2,6 +2,7 @@
 
 Nao substitui parsers atuais e nao libera XLSX para estruturas desconhecidas.
 """
+import re
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -141,6 +142,52 @@ def gerar_previa_url_universal(url: str):
     return deteccao, previa
 
 
+def _sanear_classificacao_anota(resultado, plataforma: Optional[str]):
+    """Corrige somente o falso positivo real comprovado de vinho como pizza.
+
+    O payload atual do Anota AI pode marcar uma categoria com ``category_type``
+    igual a ``pizza`` mesmo quando os produtos nela sao vinhos. O parser legado
+    preserva esse campo como pista forte e, por isso, esses produtos acabam na
+    lista de pizzas. No Universal V2 fazemos uma correcao conservadora: um item
+    explicitamente identificado como vinho so e reclassificado para regular
+    quando nome/categoria/descricao NAO trazem evidencia semantica de pizza.
+
+    A regra fica restrita ao Anota AI e ao caso comprovado; nenhuma classificacao
+    das demais plataformas e alterada.
+    """
+    if plataforma != "Anota AI" or resultado is None or not getattr(resultado, "pizzas", None):
+        return resultado
+
+    from utils import parece_pizza
+
+    manter = []
+    regulares = []
+    for produto in list(resultado.pizzas or []):
+        texto = f"{getattr(produto, 'nome', '')} {getattr(produto, 'categoria', '')}"
+        eh_vinho = bool(re.search(r"\bvinho(?:s)?\b", texto, re.IGNORECASE))
+        tem_evidencia_pizza = parece_pizza(
+            getattr(produto, "nome", ""),
+            getattr(produto, "categoria", ""),
+            getattr(produto, "descricao", ""),
+        )
+        if eh_vinho and not tem_evidencia_pizza:
+            produto.pizza = False
+            produto.metodo_preco_pizza = 0
+            regulares.append(produto)
+        else:
+            manter.append(produto)
+
+    if regulares:
+        resultado.pizzas = manter
+        resultado.itens.extend(regulares)
+        nomes = ", ".join(str(getattr(p, "nome", "")) for p in regulares[:6])
+        resultado.avisos.append(
+            f"Universal V2 reclassificou {len(regulares)} vinho(s) que o Anota AI marcou como pizza sem evidencia semantica: {nomes}."
+        )
+
+    return resultado
+
+
 def ler_url_universal(url: str, usar_playwright: bool = True):
     deteccao = detectar_url(url)
     if deteccao.estrategia == "diagnostico":
@@ -148,6 +195,7 @@ def ler_url_universal(url: str, usar_playwright: bool = True):
 
     from fetchers import buscar_por_url
     resultado = buscar_por_url(deteccao.url_normalizada, usar_playwright=bool(usar_playwright))
+    resultado = _sanear_classificacao_anota(resultado, deteccao.plataforma)
     try:
         setattr(resultado, "_leitor_universal", {
             "plataforma": deteccao.plataforma,
