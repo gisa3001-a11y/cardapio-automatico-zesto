@@ -72,6 +72,23 @@ class TestUniversalRouter(unittest.TestCase):
         self.assertEqual(len(saneado.itens), 1)
         self.assertFalse(saneado.itens[0].pizza)
 
+    def test_anota_vinho_com_descricao_contaminada_ainda_e_reclassificado(self):
+        vinho = Produto(
+            codigo="v-desc",
+            nome="Vinho Cantinho do Vale 2L",
+            categoria="Pizzas",
+            descricao="Categoria de pizzas e sabores disponíveis.",
+            preco=39.9,
+            pizza=True,
+        )
+        resultado = Resultado(itens=[], pizzas=[vinho], origem="Anota AI")
+
+        saneado = _sanear_classificacao_anota(resultado, "Anota AI")
+
+        self.assertEqual(len(saneado.pizzas), 0)
+        self.assertEqual(len(saneado.itens), 1)
+        self.assertFalse(saneado.itens[0].pizza)
+
     def test_anota_nao_reclassifica_item_com_evidencia_real_de_pizza(self):
         item = Produto(
             codigo="p1",
