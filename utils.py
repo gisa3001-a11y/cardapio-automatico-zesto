@@ -59,7 +59,16 @@ def parece_pizza(*partes):
     t = " ".join([str(x or "") for x in partes]).lower()
     if parece_combo(t):
         return False
-    return bool(re.search(r"\bpizza(?:s)?\b|\bpizzaria\b|\b1/2\b|\bmeia\b", t))
+
+    # Evidência direta e segura: nome/categoria/descrição menciona pizza/pizzaria.
+    if re.search(r"\bpizza(?:s)?\b|\bpizzaria\b", t):
+        return True
+
+    # "meia" e "1/2" isolados aparecem em vários produtos que não são pizza.
+    # Só servem como reforço quando existe também vocabulário típico de pizza.
+    metade = bool(re.search(r"\b1/2\b|\bmeia\b", t))
+    contexto_pizza = bool(re.search(r"\bsabor(?:es)?\b|\bborda(?:s)?\b|\bmassa(?:s)?\b|\btamanho(?:s)?\b", t))
+    return metade and contexto_pizza
 
 def slug_from_url(url):
     p = urlparse(url)
