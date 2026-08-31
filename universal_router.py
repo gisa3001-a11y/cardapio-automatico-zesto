@@ -150,7 +150,12 @@ def _sanear_classificacao_anota(resultado, plataforma: Optional[str]):
     preserva esse campo como pista forte e, por isso, esses produtos acabam na
     lista de pizzas. No Universal V2 fazemos uma correcao conservadora: um item
     explicitamente identificado como vinho so e reclassificado para regular
-    quando nome/categoria/descricao NAO trazem evidencia semantica de pizza.
+    quando nome/descricao NAO trazem evidencia semantica de pizza.
+
+    A categoria nao entra nessa segunda checagem porque justamente ela pode estar
+    contaminada pelo ``category_type`` incorreto comprovado no caso real. Uma
+    pizza genuina que mencione vinho continua protegida quando nome ou descricao
+    trazem evidencia explicita de pizza.
 
     A regra fica restrita ao Anota AI e ao caso comprovado; nenhuma classificacao
     das demais plataformas e alterada.
@@ -167,7 +172,7 @@ def _sanear_classificacao_anota(resultado, plataforma: Optional[str]):
         eh_vinho = bool(re.search(r"\bvinho(?:s)?\b", texto, re.IGNORECASE))
         tem_evidencia_pizza = parece_pizza(
             getattr(produto, "nome", ""),
-            getattr(produto, "categoria", ""),
+            "",
             getattr(produto, "descricao", ""),
         )
         if eh_vinho and not tem_evidencia_pizza:
