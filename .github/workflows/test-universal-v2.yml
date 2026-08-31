@@ -53,6 +53,7 @@ jobs:
           python -m py_compile preview_runner.py
           python -m py_compile real_url_validation.py
           python -m py_compile real_url_validation_parallel.py
+          python -m py_compile real_xlsx_validation.py
           python -m py_compile debug_probe_urls.py
           python -m py_compile debug_network_map.py
           python -m py_compile universal_readiness.py
@@ -107,6 +108,10 @@ jobs:
         continue-on-error: true
         run: python real_url_validation_parallel.py
 
+      - name: Validacao controlada de XLSX com dados reais
+        continue-on-error: true
+        run: python real_xlsx_validation.py
+
       - name: Avaliar prontidao da V2
         if: always()
         run: python universal_readiness.py
@@ -119,6 +124,7 @@ jobs:
           path: |
             artifacts/real_url_report.json
             artifacts/real_url_report.md
+            artifacts/real_xlsx_report.json
             artifacts/probe_endpoints.json
             artifacts/network_map.json
             artifacts/readiness.json
@@ -136,5 +142,6 @@ jobs:
           assert Path('saipos_public_probe.py').exists()
           assert Path('universal_integration.py').exists()
           assert Path('universal_app_bridge.py').exists()
+          assert Path('real_xlsx_validation.py').exists()
           print('Camada universal presente e integrada na branch testada.')
           PY
