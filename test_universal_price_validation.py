@@ -1,5 +1,7 @@
+from models import Produto, Resultado
 from price_resolution import aplicar_resolucao_precos
 from universal_validation import validar_previa
+from validator import validar
 
 
 def test_preco_zero_resolvido_por_tamanho():
@@ -109,3 +111,43 @@ def test_ausencia_de_fotos_gera_alerta_mas_nao_bloqueia_estrutura_coerente():
     assert v.aprovado is True
     assert v.score >= 85
     assert any("foto" in a.lower() or "imagem" in a.lower() for a in v.avisos)
+
+
+def test_validator_nao_desfaz_vinho_saneado_do_anota_ai():
+    vinho = Produto(
+        codigo="v-real",
+        nome="Vinho Concha Y Toro 750ml",
+        categoria="Pizzas",
+        descricao="Categoria de pizzas e sabores disponíveis.",
+        preco=34.9,
+        pizza=False,
+    )
+    resultado = Resultado(itens=[vinho], pizzas=[], origem="Anota AI")
+    resultado._leitor_universal = {"plataforma": "Anota AI"}
+
+    erros, _ = validar(resultado)
+
+    assert erros == []
+    assert [p.nome for p in resultado.itens] == ["Vinho Concha Y Toro 750ml"]
+    assert resultado.pizzas == []
+    assert resultado.itens[0].pizza is False
+
+
+def test_validator_nao_desfaz_pastel_saneado_do_ola_click():
+    pastel = Produto(
+        codigo="pastel-real",
+        nome="Pastel",
+        categoria="Café da Manhã(sex,sab,dom-)",
+        descricao="Carne, queijo, frango e pizza.",
+        preco=14.0,
+        pizza=False,
+    )
+    resultado = Resultado(itens=[pastel], pizzas=[], origem="Ola Click")
+    resultado._leitor_universal = {"plataforma": "Ola Click"}
+
+    erros, _ = validar(resultado)
+
+    assert erros == []
+    assert [p.nome for p in resultado.itens] == ["Pastel"]
+    assert resultado.pizzas == []
+    assert resultado.itens[0].pizza is False
