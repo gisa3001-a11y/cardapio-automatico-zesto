@@ -149,13 +149,13 @@ def _sanear_classificacao_anota(resultado, plataforma: Optional[str]):
     igual a ``pizza`` mesmo quando os produtos nela sao vinhos. O parser legado
     preserva esse campo como pista forte e, por isso, esses produtos acabam na
     lista de pizzas. No Universal V2 fazemos uma correcao conservadora: um item
-    explicitamente identificado como vinho so e reclassificado para regular
-    quando nome/descricao NAO trazem evidencia semantica de pizza.
+    explicitamente identificado como vinho so permanece pizza quando o proprio
+    nome traz evidencia semantica de pizza.
 
-    A categoria nao entra nessa segunda checagem porque justamente ela pode estar
-    contaminada pelo ``category_type`` incorreto comprovado no caso real. Uma
-    pizza genuina que mencione vinho continua protegida quando nome ou descricao
-    trazem evidencia explicita de pizza.
+    Categoria e descricao nao entram nessa segunda checagem porque ambos podem
+    herdar contexto contaminado da categoria incorreta comprovada no caso real.
+    Uma pizza genuina que mencione vinho continua protegida quando o nome traz
+    evidencia explicita de pizza, como "Pizza com Vinho".
 
     A regra fica restrita ao Anota AI e ao caso comprovado; nenhuma classificacao
     das demais plataformas e alterada.
@@ -168,13 +168,10 @@ def _sanear_classificacao_anota(resultado, plataforma: Optional[str]):
     manter = []
     regulares = []
     for produto in list(resultado.pizzas or []):
-        texto = f"{getattr(produto, 'nome', '')} {getattr(produto, 'categoria', '')}"
+        nome = str(getattr(produto, "nome", "") or "")
+        texto = f"{nome} {getattr(produto, 'categoria', '')}"
         eh_vinho = bool(re.search(r"\bvinho(?:s)?\b", texto, re.IGNORECASE))
-        tem_evidencia_pizza = parece_pizza(
-            getattr(produto, "nome", ""),
-            "",
-            getattr(produto, "descricao", ""),
-        )
+        tem_evidencia_pizza = parece_pizza(nome, "", "")
         if eh_vinho and not tem_evidencia_pizza:
             produto.pizza = False
             produto.metodo_preco_pizza = 0
@@ -187,7 +184,7 @@ def _sanear_classificacao_anota(resultado, plataforma: Optional[str]):
         resultado.itens.extend(regulares)
         nomes = ", ".join(str(getattr(p, "nome", "")) for p in regulares[:6])
         resultado.avisos.append(
-            f"Universal V2 reclassificou {len(regulares)} vinho(s) que o Anota AI marcou como pizza sem evidencia semantica: {nomes}."
+            f"Universal V2 reclassificou {len(regulares)} vinho(s) que o Anota AI marcou como pizza sem evidencia semantica no nome: {nomes}."
         )
 
     return resultado
