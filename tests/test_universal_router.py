@@ -1,7 +1,12 @@
 import unittest
 
 from models import Produto, Resultado
-from universal_router import _sanear_classificacao_anota, detectar_url, normalizar_url
+from universal_router import (
+    _sanear_classificacao_anota,
+    _sanear_classificacao_olaclick,
+    detectar_url,
+    normalizar_url,
+)
 
 
 class TestUniversalRouter(unittest.TestCase):
@@ -116,6 +121,57 @@ class TestUniversalRouter(unittest.TestCase):
         resultado = Resultado(itens=[], pizzas=[vinho], origem="Outra")
 
         saneado = _sanear_classificacao_anota(resultado, "Ola Click")
+
+        self.assertEqual(len(saneado.pizzas), 1)
+        self.assertEqual(len(saneado.itens), 0)
+
+    def test_olaclick_pastel_com_pizza_so_na_descricao_volta_para_regular(self):
+        pastel = Produto(
+            codigo="a14c77f7-5409-4635-a409-b27ca4e0cc08",
+            nome="Pastel",
+            categoria="Café da Manhã(sex,sab,dom-)",
+            descricao="Carne, carne c/ queijo, frango c/ catupiry, queijo e pizza.",
+            preco=14.0,
+            pizza=True,
+        )
+        resultado = Resultado(itens=[], pizzas=[pastel], origem="Ola Click")
+
+        saneado = _sanear_classificacao_olaclick(resultado, "Ola Click")
+
+        self.assertEqual(len(saneado.pizzas), 0)
+        self.assertEqual(len(saneado.itens), 1)
+        self.assertFalse(saneado.itens[0].pizza)
+        self.assertTrue(any("reclassificou 1 pastel" in a for a in saneado.avisos))
+
+    def test_olaclick_preserva_pastel_de_pizza(self):
+        pastel = Produto(
+            codigo="pastel-pizza",
+            nome="Pastel de Pizza",
+            categoria="Salgados",
+            descricao="Mussarela, tomate e orégano.",
+            preco=15.0,
+            pizza=True,
+        )
+        resultado = Resultado(itens=[], pizzas=[pastel], origem="Ola Click")
+
+        saneado = _sanear_classificacao_olaclick(resultado, "Ola Click")
+
+        self.assertEqual(len(saneado.pizzas), 1)
+        self.assertEqual(len(saneado.itens), 0)
+        self.assertTrue(saneado.pizzas[0].pizza)
+
+    def test_saneamento_olaclick_nao_altera_outras_plataformas(self):
+        pastel = Produto(
+            codigo="pastel-outra",
+            nome="Pastel",
+            categoria="Salgados",
+            descricao="Sabores queijo e pizza.",
+            preco=14.0,
+            pizza=True,
+        )
+        resultado = Resultado(itens=[], pizzas=[pastel], origem="Outra")
+
+        saneado = _sanear_classificacao_olaclick(resultado, "Anota AI")
 
         self.assertEqual(len(saneado.pizzas), 1)
         self.assertEqual(len(saneado.itens), 0)
