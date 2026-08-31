@@ -37,6 +37,9 @@ def test_validacao_bloqueia_pizza_indefinida():
     v=validar_previa(produtos,grupos,pizzas,"alta")
     assert v.aprovado is False
     assert any("metodo de preco" in e for e in v.erros)
+    assert any("Pizza 0 [0]" in e for e in v.erros)
+    assert v.metricas["pizzas_metodo_indefinido"] == 1
+    assert v.metricas["pizzas_metodo_indefinido_itens"] == ["Pizza 0 [0]"]
 
 
 def test_validacao_aprova_estrutura_coerente():
@@ -65,7 +68,26 @@ def test_validacao_nao_trata_preco_base_zero_com_grupo_precificado_como_pendente
     assert v.metricas["precos_zero"] == 3
     assert v.metricas["precos_zero_estruturados"] == 3
     assert v.metricas["precos_zero_pendentes"] == 0
+    assert v.metricas["precos_zero_pendentes_itens"] == []
     assert not any("Muitos produtos" in e for e in v.erros)
+
+
+def test_validacao_identifica_produto_com_preco_zero_pendente():
+    produtos=[
+        {
+            "codigo":str(i),
+            "nome":"Produto Zero" if i == 0 else f"Item {i}",
+            "preco":0 if i == 0 else 20+i,
+            "grupos":[],
+            "imagem":f"https://img/{i}.jpg",
+            "categoria":"Lanches",
+        }
+        for i in range(10)
+    ]
+    v=validar_previa(produtos,[],[],"alta")
+    assert v.metricas["precos_zero_pendentes"] == 1
+    assert v.metricas["precos_zero_pendentes_itens"] == ["Produto Zero [0]"]
+    assert any("Produto Zero [0]" in a for a in v.avisos)
 
 
 def test_parser_oficial_pode_validar_cardapio_legitimo_com_dois_itens():
