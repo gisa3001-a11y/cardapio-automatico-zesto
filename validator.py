@@ -42,6 +42,26 @@ def _preservar_regular_saneado_universal(resultado: Resultado, produto) -> bool:
     return False
 
 
+def _chave_funcional_opcao(grupo):
+    """Identidade estrutural de uma opção dentro de um grupo.
+
+    Nome e preço iguais não bastam para declarar duplicidade: em cardápios reais a
+    mesma opção pode reaparecer com função/regras distintas. Só bloqueamos quando
+    também coincidem tipo, nome do grupo e regras de seleção/repetição/preço.
+    """
+    return (
+        str(grupo.grupo_id),
+        str(grupo.nome).strip().lower(),
+        round(float(grupo.preco or 0), 6),
+        int(getattr(grupo, "tipo", 1) or 1),
+        str(getattr(grupo, "grupo_nome", "") or "").strip().lower(),
+        int(getattr(grupo, "minimo", 0) or 0),
+        int(getattr(grupo, "maximo", 1) or 1),
+        int(getattr(grupo, "repetir", 0) or 0),
+        int(getattr(grupo, "metodo_preco", 1) or 1),
+    )
+
+
 def validar(resultado: Resultado):
     erros=[]
     avisos=[]
@@ -92,10 +112,12 @@ def validar(resultado: Resultado):
             f'Código de produto duplicado "{codigo}": {", ".join(nomes)}'
         )
 
-    # Não permite duplicar a mesma opção dentro do mesmo grupo.
+    # Não permite duplicar a mesma opção funcional dentro do mesmo grupo.
+    # A mesma combinação nome/preço pode existir legitimamente quando muda a
+    # função/regra da opção; nesses casos ela deve ser preservada.
     opcoes_vistas=set()
     for g in resultado.grupos:
-        chave=(str(g.grupo_id), str(g.nome).strip().lower(), round(float(g.preco or 0),6))
+        chave=_chave_funcional_opcao(g)
         if chave in opcoes_vistas:
             erros.append(
                 f'Opção duplicada no grupo {g.grupo_id}: "{g.nome}" ({g.preco}).'
