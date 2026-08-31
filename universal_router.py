@@ -190,6 +190,48 @@ def _sanear_classificacao_anota(resultado, plataforma: Optional[str]):
     return resultado
 
 
+def _sanear_classificacao_olaclick(resultado, plataforma: Optional[str]):
+    """Corrige somente o falso positivo comprovado de pastel como pizza no Ola Click.
+
+    No cardapio real validado, o produto "Pastel" aparece em uma categoria de
+    cafe da manha e sua descricao enumera sabores, incluindo a palavra "pizza".
+    O classificador generico usa nome/categoria/descricao e, por isso, marcava o
+    pastel inteiro como pizza. Para evitar alterar pizzas verdadeiras, a correcao
+    fica restrita ao Ola Click e a produtos identificados como pastel: eles so
+    saem de pizzas quando nome e categoria, sem a descricao, nao trazem evidencia
+    semantica de pizza. Assim, "Pastel de Pizza" ou pastel dentro de categoria
+    explicitamente de pizzas continua preservado.
+    """
+    if plataforma != "Ola Click" or resultado is None or not getattr(resultado, "pizzas", None):
+        return resultado
+
+    from utils import parece_pizza
+
+    manter = []
+    regulares = []
+    for produto in list(resultado.pizzas or []):
+        nome = str(getattr(produto, "nome", "") or "")
+        categoria = str(getattr(produto, "categoria", "") or "")
+        eh_pastel = bool(re.search(r"\bpast(?:el|eis)\b", nome, re.IGNORECASE))
+        tem_evidencia_pizza_nome_categoria = parece_pizza(nome, categoria, "")
+        if eh_pastel and not tem_evidencia_pizza_nome_categoria:
+            produto.pizza = False
+            produto.metodo_preco_pizza = 0
+            regulares.append(produto)
+        else:
+            manter.append(produto)
+
+    if regulares:
+        resultado.pizzas = manter
+        resultado.itens.extend(regulares)
+        nomes = ", ".join(str(getattr(p, "nome", "")) for p in regulares[:6])
+        resultado.avisos.append(
+            f"Universal V2 reclassificou {len(regulares)} pastel(is) que o Ola Click marcou como pizza apenas pelo texto descritivo: {nomes}."
+        )
+
+    return resultado
+
+
 def ler_url_universal(url: str, usar_playwright: bool = True):
     deteccao = detectar_url(url)
     if deteccao.estrategia == "diagnostico":
@@ -198,6 +240,7 @@ def ler_url_universal(url: str, usar_playwright: bool = True):
     from fetchers import buscar_por_url
     resultado = buscar_por_url(deteccao.url_normalizada, usar_playwright=bool(usar_playwright))
     resultado = _sanear_classificacao_anota(resultado, deteccao.plataforma)
+    resultado = _sanear_classificacao_olaclick(resultado, deteccao.plataforma)
     try:
         setattr(resultado, "_leitor_universal", {
             "plataforma": deteccao.plataforma,
