@@ -1,4 +1,5 @@
 from pizza_rules import diagnosticar_pizza
+from utils import parece_pizza
 
 
 def test_pizza_com_sabores_precos_diferentes_sugere_maior_valor():
@@ -47,3 +48,19 @@ def test_produto_com_sabor_sem_contexto_nao_vira_pizza_automaticamente():
     ]
     d = diagnosticar_pizza(produto, grupos)
     assert d.pizza is False
+
+
+def test_meia_isolada_nao_classifica_produto_comum_como_pizza():
+    assert parece_pizza("Produto meia unidade", "Bebidas", "") is False
+
+
+def test_fracao_isolada_nao_classifica_produto_comum_como_pizza():
+    assert parece_pizza("Produto 1/2 unidade", "Outros", "") is False
+
+
+def test_meia_com_contexto_tipico_de_pizza_continua_sendo_detectada():
+    assert parece_pizza("Meia Calabresa", "", "Escolha os sabores") is True
+
+
+def test_categoria_pizzas_continua_sendo_evidencia_direta():
+    assert parece_pizza("Calabresa", "Pizzas", "") is True
