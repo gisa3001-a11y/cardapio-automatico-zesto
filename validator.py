@@ -1,5 +1,46 @@
+import re
+
 from models import Resultado
 from utils import parece_pizza
+
+
+def _preservar_regular_saneado_universal(resultado: Resultado, produto) -> bool:
+    """Evita que o validator desfaça saneamentos comprovados do Universal V2.
+
+    O roteador universal já corrige dois falsos positivos específicos e validados
+    com dados reais: vinhos do Anota AI cuja categoria vem marcada como pizza e o
+    produto Pastel do Ola Click cuja descrição lista "pizza" apenas como sabor.
+    Depois disso, ``validar`` não deve reclassificar esses mesmos itens usando a
+    heurística genérica de nome/categoria/descrição.
+
+    A exceção só vale quando o Resultado veio do Leitor Universal V2, o produto já
+    está explicitamente como regular e corresponde aos mesmos critérios restritos
+    usados pelo saneamento. Parsers/Resultados fora desse fluxo permanecem com o
+    comportamento anterior.
+    """
+    if bool(getattr(produto, "pizza", False)):
+        return False
+
+    meta = getattr(resultado, "_leitor_universal", None) or {}
+    plataforma = str(meta.get("plataforma") or "")
+    nome = str(getattr(produto, "nome", "") or "")
+    categoria = str(getattr(produto, "categoria", "") or "")
+
+    if plataforma == "Anota AI":
+        texto = f"{nome} {categoria}"
+        eh_vinho = bool(re.search(r"\bvinho(?:s)?\b", texto, re.IGNORECASE))
+        # O saneamento do roteador só mantém como pizza quando o próprio nome
+        # possui evidência real. Categoria/descrição podem estar contaminadas.
+        return eh_vinho and not parece_pizza(nome, "", "")
+
+    if plataforma == "Ola Click":
+        eh_pastel = bool(re.search(r"\bpast(?:el|eis)\b", nome, re.IGNORECASE))
+        # "Pastel de Pizza" e pastel em categoria realmente de pizzas continuam
+        # elegíveis à heurística; só o caso com pizza apenas na descrição é salvo.
+        return eh_pastel and not parece_pizza(nome, categoria, "")
+
+    return False
+
 
 def validar(resultado: Resultado):
     erros=[]
@@ -9,6 +50,9 @@ def validar(resultado: Resultado):
     novos_itens=[]
     for p in resultado.itens:
         if p.combo:
+            novos_itens.append(p)
+            continue
+        if _preservar_regular_saneado_universal(resultado, p):
             novos_itens.append(p)
             continue
         if p.pizza or parece_pizza(p.nome,p.categoria,p.descricao):
