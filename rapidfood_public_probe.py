@@ -216,6 +216,18 @@ def extrair_cards_semanticos_html(html: str) -> List[Dict[str, Any]]:
         item = _produto_por_ancestral(tag, titulo, categoria_atual)
         if item is None:
             item = _produto_por_fluxo(tag, titulo, categoria_atual)
+        elif not item.get("image"):
+            # No RapidFood real, texto/preco/botao podem estar em um bloco interno
+            # enquanto a foto fica como irmao logo depois. O ancestral pequeno e
+            # correto para preco/nome, mas perde essa foto. Complementamos somente
+            # quando o fluxo encontra a MESMA faixa de produto e o MESMO preco.
+            fluxo = _produto_por_fluxo(tag, titulo, categoria_atual)
+            if (
+                fluxo
+                and fluxo.get("image")
+                and round(float(fluxo.get("price") or 0), 2) == round(float(item.get("price") or 0), 2)
+            ):
+                item["image"] = fluxo["image"]
         if item is None:
             continue
 
