@@ -27,7 +27,7 @@ CASOS_XLSX = [
     ("RapidFood", "https://rapidfood.com.br/panelamineira"),
     ("byFood", "https://pointdogosasco.byfood.com.br"),
     ("InstaDelivery", "https://instadelivery.com.br/acaidorafa1"),
-    ("Brendi", "https://pedido.brendi.com.br/flores-pizzas-artesanais-colina-azul"),
+    ("Brendi", "https://pedido.brendi.com.br/pizzaria-tortelli/"),
     ("Ola Click", "https://eloni-bistro.ola.click/products"),
     ("Saipos", "https://temperodaleia.saipos.com/"),
     ("Cardapio Web", "https://app.cardapioweb.com/shakepoint_westplaza"),
