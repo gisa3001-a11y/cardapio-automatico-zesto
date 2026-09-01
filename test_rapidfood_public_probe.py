@@ -46,6 +46,28 @@ def test_extrai_cards_semanticos_por_h2_h3_preco():
     assert itens[2]["image"] == "https://img.example/refri.jpg"
 
 
+def test_recupera_foto_quando_imagem_e_irma_do_bloco_de_preco():
+    html = '''
+    <main>
+      <h2>Pratos do Dia!!</h2>
+      <article>
+        <div class="dados">
+          <h3>churrasco completo</h3>
+          <p>arroz, feijao, farofa, macarrao, carne, linguica</p>
+          <span>R$ 35,00</span>
+          <button>Adicionar</button>
+        </div>
+        <img src="https://rapidfood.com.br/dashboard/uploads/produtos/churrasco.webp">
+      </article>
+      <h3>Proximo Produto</h3><span>R$ 20,00</span><button>Adicionar</button>
+    </main>
+    '''
+    itens = extrair_cards_semanticos_html(html)
+    churrasco = next(item for item in itens if item["name"] == "churrasco completo")
+    assert churrasco["price"] == 35.0
+    assert churrasco["image"] == "https://rapidfood.com.br/dashboard/uploads/produtos/churrasco.webp"
+
+
 def test_semantico_deduplica_mesmo_nome_e_preco():
     html = '''
     <h2>Destaques</h2>
