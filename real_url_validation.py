@@ -21,7 +21,7 @@ from universal_validation import validar_previa
 
 CASOS = [
     ("RapidFood", "https://rapidfood.com.br/panelamineira"),
-    ("Brendi", "https://pedido.brendi.com.br/flores-pizzas-artesanais-colina-azul"),
+    ("Brendi", "https://pedido.brendi.com.br/pizzaria-tortelli/"),
     ("WhatsMenu", "https://whatsmenu.com.br/restauranterecantomineiro"),
     ("InstaDelivery", "https://instadelivery.com.br/acaidorafa1"),
     ("byFood", "https://pointdogosasco.byfood.com.br"),
