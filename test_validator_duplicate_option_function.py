@@ -33,13 +33,14 @@ def test_mesmo_nome_preco_com_funcao_diferente_nao_bloqueia():
     ]
     resultado = Resultado(itens=[_produto()], grupos=grupos)
 
-    erros, _ = validar(resultado)
+    erros, avisos = validar(resultado)
 
-    assert not any("Opção duplicada" in erro for erro in erros)
+    assert not any("Opção repetida" in erro for erro in erros)
+    assert not any("Opção repetida" in aviso for aviso in avisos)
     assert len(resultado.grupos) == 2
 
 
-def test_opcao_realmente_identica_continua_bloqueada():
+def test_opcao_realmente_identica_e_preservada_com_aviso_sem_bloquear():
     grupo = dict(
         grupo_id="g1",
         tipo=1,
@@ -56,6 +57,8 @@ def test_opcao_realmente_identica_continua_bloqueada():
         grupos=[GrupoOpcao(**grupo), GrupoOpcao(**grupo)],
     )
 
-    erros, _ = validar(resultado)
+    erros, avisos = validar(resultado)
 
-    assert any("Opção duplicada" in erro for erro in erros)
+    assert not any("Opção repetida" in erro for erro in erros)
+    assert any("Opção repetida preservada" in aviso for aviso in avisos)
+    assert len(resultado.grupos) == 2
