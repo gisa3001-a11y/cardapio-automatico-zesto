@@ -1,5 +1,5 @@
 from pizza_rules import diagnosticar_pizza
-from utils import parece_pizza
+from utils import parece_combo, parece_pizza
 
 
 def test_pizza_com_sabores_precos_diferentes_sugere_maior_valor():
@@ -64,3 +64,15 @@ def test_meia_com_contexto_tipico_de_pizza_continua_sendo_detectada():
 
 def test_categoria_pizzas_continua_sendo_evidencia_direta():
     assert parece_pizza("Calabresa", "Pizzas", "") is True
+
+
+def test_oferta_de_duas_pizzas_e_combo_e_nao_pizza_unitaria():
+    nome = "2 deliciosas pizzas grandes"
+    descricao = "2 Pizzas Grandes de R$139,90 por apenas R$89,90"
+    assert parece_combo(nome, descricao) is True
+    assert parece_pizza(nome, "Promoções para Grupos", descricao) is False
+
+
+def test_pizza_unitaria_continua_sendo_pizza():
+    assert parece_combo("Grande - 8 Fatias", "8 Pedaços Escolha 1 ou 2 sabores") is False
+    assert parece_pizza("Grande - 8 Fatias", "Pizzas Grandes", "8 Pedaços Escolha 1 ou 2 sabores") is True
