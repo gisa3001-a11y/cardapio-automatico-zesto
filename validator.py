@@ -46,8 +46,8 @@ def _chave_funcional_opcao(grupo):
     """Identidade estrutural de uma opção dentro de um grupo.
 
     Nome e preço iguais não bastam para declarar duplicidade: em cardápios reais a
-    mesma opção pode reaparecer com função/regras distintas. Só bloqueamos quando
-    também coincidem tipo, nome do grupo e regras de seleção/repetição/preço.
+    mesma opção pode reaparecer com função/regras distintas. A chave completa serve
+    apenas para detectar repetições realmente idênticas e avisar sem apagar a fonte.
     """
     return (
         str(grupo.grupo_id),
@@ -112,15 +112,15 @@ def validar(resultado: Resultado):
             f'Código de produto duplicado "{codigo}": {", ".join(nomes)}'
         )
 
-    # Não permite duplicar a mesma opção funcional dentro do mesmo grupo.
-    # A mesma combinação nome/preço pode existir legitimamente quando muda a
-    # função/regra da opção; nesses casos ela deve ser preservada.
+    # Repetições de opções da própria fonte são preservadas. Mesmo quando todos os
+    # campos estruturais coincidem, isso não prova erro de leitura nem torna o XLSX
+    # inseguro. Avisamos para auditoria, mas não deduplicamos e não bloqueamos.
     opcoes_vistas=set()
     for g in resultado.grupos:
         chave=_chave_funcional_opcao(g)
         if chave in opcoes_vistas:
-            erros.append(
-                f'Opção duplicada no grupo {g.grupo_id}: "{g.nome}" ({g.preco}).'
+            avisos.append(
+                f'Opção repetida preservada no grupo {g.grupo_id}: "{g.nome}" ({g.preco}).'
             )
         opcoes_vistas.add(chave)
 
