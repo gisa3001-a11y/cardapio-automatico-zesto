@@ -32,7 +32,7 @@ CASOS = [
     ("Ola Click", "https://eloni-bistro.ola.click/products"),
     ("Cardapio Web", "https://app.cardapioweb.com/shakepoint_westplaza"),
     ("EntregueJa", "https://vemdeburger.entregueja.com.br/home"),
-    ("Saipos", "https://temperodaleia.saipos.com/"),
+    ("Saipos", "https://xisda15.saipos.com/home"),
     ("Anota AI", "https://app.anota.ai/m/xPELP5xiw"),
     ("ECTA", "https://www.ecta.com.br/PizzariaMaisvoce?w=1"),
     ("PedidoSite", "https://gordolancheshamburgueria.pedidosite.com.br/?loja=9919"),
