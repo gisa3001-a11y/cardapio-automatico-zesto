@@ -53,7 +53,11 @@ def tipo_grupo(nome):
 
 def parece_combo(*partes):
     t = " ".join([str(x or "") for x in partes]).lower()
-    return bool(re.search(r"\bcombo\b|kit|promo(?:ção|cao)|\+\s*\w+", t))
+    return bool(re.search(
+        r"\bcombo\b|kit|promo(?:ção|cao)|\+\s*\w+|"
+        r"\b(?:2|dois|duas)\s+pizzas?\b",
+        t,
+    ))
 
 def parece_pizza(*partes):
     t = " ".join([str(x or "") for x in partes]).lower()
