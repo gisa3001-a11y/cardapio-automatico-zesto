@@ -33,6 +33,14 @@ CASOS_XLSX = [
     ("Cardapio Web", "https://app.cardapioweb.com/shakepoint_westplaza"),
 ]
 
+# Guardas estruturais só entram quando há evidência pública inequívoca na própria
+# fonte real usada pela bateria. A loja Brendi de controle expõe pizzas que exigem
+# escolha de sabores; portanto, zero grupos/opções é perda estrutural e não pode
+# ser contabilizado como XLSX saudável apenas porque o arquivo abre corretamente.
+MINIMOS_ESTRUTURAIS = {
+    "Brendi": {"opcoes": 1, "produtos_com_grupo": 1},
+}
+
 
 def _template_minimo() -> bytes:
     wb = Workbook()
@@ -86,6 +94,21 @@ def _inspecionar_xlsx(xlsx: bytes) -> Dict[str, Any]:
     }
 
 
+def _regressao_estrutural(label: str, item: Dict[str, Any]) -> str | None:
+    minimo = MINIMOS_ESTRUTURAIS.get(label)
+    if not minimo:
+        return None
+
+    faltas = []
+    for campo, esperado in minimo.items():
+        atual = int(item.get(campo) or 0)
+        if atual < esperado:
+            faltas.append(f"{campo}={atual} (mínimo comprovado: {esperado})")
+    if not faltas:
+        return None
+    return "; ".join(faltas)
+
+
 def validar_caso_xlsx(label: str, url: str) -> Dict[str, Any]:
     item: Dict[str, Any] = {"caso": label, "url": url}
     try:
@@ -105,6 +128,18 @@ def validar_caso_xlsx(label: str, url: str) -> Dict[str, Any]:
             "produtos_com_grupo": sum(1 for p in produtos if p.grupos),
             "produtos_com_imagem": sum(1 for p in produtos if p.imagem),
         })
+
+        regressao = _regressao_estrutural(label, item)
+        if regressao:
+            item.update({
+                "status": "regressao-estrutura",
+                "xlsx_gerado": False,
+                "erro": (
+                    "A fonte real comprova estrutura configurável que não foi preservada pelo leitor: "
+                    + regressao
+                ),
+            })
+            return item
 
         erros, avisos = validar(resultado)
         item["avisos_validacao"] = list(avisos or [])[:10]
@@ -160,6 +195,7 @@ def main() -> int:
         "xlsx_ok": sum(1 for r in resultados if r.get("status") == "xlsx-ok"),
         "nao_testaveis": sum(1 for r in resultados if r.get("status") == "sem-produtos"),
         "nao_elegiveis": sum(1 for r in resultados if r.get("status") == "nao-elegivel"),
+        "regressoes_estrutura": sum(1 for r in resultados if r.get("status") == "regressao-estrutura"),
         "falhas_xlsx": sum(1 for r in resultados if r.get("status") == "erro-xlsx"),
         "resultados": resultados,
     }
@@ -167,8 +203,14 @@ def main() -> int:
     Path("artifacts/real_xlsx_report.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    print(json.dumps({k: payload[k] for k in ("total_casos", "xlsx_ok", "nao_testaveis", "nao_elegiveis", "falhas_xlsx")}, ensure_ascii=False))
-    return 1 if payload["falhas_xlsx"] else 0
+    print(json.dumps({
+        k: payload[k]
+        for k in (
+            "total_casos", "xlsx_ok", "nao_testaveis", "nao_elegiveis",
+            "regressoes_estrutura", "falhas_xlsx"
+        )
+    }, ensure_ascii=False))
+    return 1 if payload["falhas_xlsx"] or payload["regressoes_estrutura"] else 0
 
 
 if __name__ == "__main__":
