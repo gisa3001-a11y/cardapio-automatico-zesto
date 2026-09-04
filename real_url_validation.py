@@ -29,7 +29,7 @@ CASOS = [
     ("Hubt", "https://www.hubt.com.br/oriental-suzano/"),
     ("MenuDino", "https://pollolokoouroverde.menudino.com/"),
     ("Neemo", "https://loja.neemo.com.br/braseiro-choperia-e-espetaria"),
-    ("Ola Click", "https://eloni-bistro.ola.click/products"),
+    ("Ola Click", "https://happy-moments-2.ola.click/products"),
     ("Cardapio Web", "https://app.cardapioweb.com/shakepoint_westplaza"),
     ("EntregueJa", "https://vemdeburger.entregueja.com.br/home"),
     ("Saipos", "https://xisda15.saipos.com/home"),
@@ -107,17 +107,12 @@ def _resumir(label: str, url: str) -> Dict[str, Any]:
         item.update({"status": "erro-roteamento", "erro": str(exc)})
         return item
 
-    # Plataformas ja suportadas devem preservar o parser especifico, pois ele
-    # conhece peculiaridades que o detector generico ainda nao conhece.
     if det.estrategia != "diagnostico":
         try:
             resultado, _ = ler_url_universal(det.url_normalizada, usar_playwright=True)
             if resultado is not None:
                 produtos, grupos, pizzas = _dicts_resultado_oficial(resultado)
                 if produtos:
-                    # Parser oficial e evidencia de plataforma: um cardapio pequeno
-                    # com 2 itens pode ser perfeitamente legitimo. O fallback generico
-                    # continua exigindo pelo menos 3 para evitar falso positivo.
                     validacao = validar_previa(produtos, grupos, pizzas, "alta", min_produtos=2).to_dict()
                     avisos_oficiais = list(getattr(resultado, "avisos", []) or [])
                     for aviso in validacao.get("avisos") or []:
@@ -144,17 +139,9 @@ def _resumir(label: str, url: str) -> Dict[str, Any]:
                         "erro": None,
                     })
                     return item
-            return _aplicar_previa_generica(
-                item,
-                det.url_normalizada,
-                "Parser oficial nao retornou produtos; acionado fallback universal.",
-            )
+            return _aplicar_previa_generica(item, det.url_normalizada, "Parser oficial nao retornou produtos; acionado fallback universal.")
         except Exception as exc:
-            return _aplicar_previa_generica(
-                item,
-                det.url_normalizada,
-                f"Parser oficial falhou ({type(exc).__name__}: {exc}); acionado fallback universal.",
-            )
+            return _aplicar_previa_generica(item, det.url_normalizada, f"Parser oficial falhou ({type(exc).__name__}: {exc}); acionado fallback universal.")
 
     try:
         return _aplicar_previa_generica(item, det.url_normalizada)
