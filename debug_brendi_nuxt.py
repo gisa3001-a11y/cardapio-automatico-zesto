@@ -1,7 +1,8 @@
 """Mapeia de forma controlada o __NUXT_DATA__ público da Brendi.
 
 Objetivo: localizar as relações entre produto, escolha do número de sabores,
-grupos e opções sem alterar o parser de produção antes de conhecer o formato.
+grupos, opções e preços sem alterar o parser de produção antes de conhecer
+o formato com precisão.
 """
 from __future__ import annotations
 
@@ -25,16 +26,14 @@ def _contem_ref(obj, alvos, depth=0):
 
 
 def _resolve_ref(data, idx, depth=0, vistos=None):
-    """Resolve uma referência do array achatado do Nuxt sem reusar inteiro literal como ref.
+    """Resolve uma referência do array achatado do Nuxt.
 
-    No __NUXT_DATA__, valores de dict/list apontam para slots do array. Porém, quando o
-    slot referenciado contém um primitivo (por exemplo 1, 2, 8, preço), esse primitivo é
-    o valor final e não uma nova referência. O diagnóstico anterior expandia esse caso
-    uma segunda vez e podia mascarar campos numéricos como numOfFlavors/slices.
+    Um inteiro encontrado dentro de dict/list aponta para um slot do array.
+    Quando esse slot contém um primitivo, o primitivo já é o valor final.
     """
     if vistos is None:
         vistos = set()
-    if depth > 7:
+    if depth > 9:
         return "<depth-limit>"
     if not isinstance(idx, int) or not (0 <= idx < len(data)):
         return idx
@@ -45,23 +44,25 @@ def _resolve_ref(data, idx, depth=0, vistos=None):
     vistos.add(idx)
     value = data[idx]
 
-    # Primitivos dentro de um slot já são o valor final.
     if not isinstance(value, (dict, list)):
         if isinstance(value, str):
-            return value[:2000]
+            return value[:4000]
         return value
 
     if isinstance(value, list):
-        return [_resolve_ref(data, x, depth + 1, vistos) if isinstance(x, int) else x for x in value[:300]]
+        return [
+            _resolve_ref(data, x, depth + 1, vistos) if isinstance(x, int) else x
+            for x in value[:500]
+        ]
 
     out = {}
-    for k, v in list(value.items())[:300]:
+    for k, v in list(value.items())[:500]:
         if isinstance(v, int):
             out[str(k)] = _resolve_ref(data, v, depth + 1, vistos)
         elif isinstance(v, list):
             out[str(k)] = [
                 _resolve_ref(data, x, depth + 1, vistos) if isinstance(x, int) else x
-                for x in v[:300]
+                for x in v[:500]
             ]
         else:
             out[str(k)] = v
@@ -78,7 +79,10 @@ def _expand_container(data, obj, depth=0, vistos=None):
     if isinstance(obj, list):
         return [_expand_container(data, x, depth + 1, vistos) for x in obj[:160]]
     if isinstance(obj, dict):
-        return {str(k): _expand_container(data, v, depth + 1, vistos) for k, v in list(obj.items())[:160]}
+        return {
+            str(k): _expand_container(data, v, depth + 1, vistos)
+            for k, v in list(obj.items())[:160]
+        }
     if isinstance(obj, str):
         return obj[:2000]
     return obj
@@ -90,8 +94,96 @@ def _entidade_interessante(obj):
     chaves = {str(k) for k in obj}
     return bool(chaves & {
         "name", "title", "productsPaths", "customsPaths", "numOfFlavors",
-        "price", "currentPrice", "extraPrice", "path", "picture", "slug"
+        "price", "prices", "currentPrice", "extraPrice", "path", "picture", "slug"
     })
+
+
+def _resolver_campo(data, obj, nome, default=None):
+    if not isinstance(obj, dict) or nome not in obj:
+        return default
+    v = obj.get(nome)
+    if isinstance(v, int):
+        return _resolve_ref(data, v)
+    if isinstance(v, list):
+        return [
+            _resolve_ref(data, x) if isinstance(x, int) else x
+            for x in v
+        ]
+    return v
+
+
+def _pizza_snapshot(data):
+    """Extrai diretamente entidades de pizza, sem depender da expansão do root.
+
+    Isso evita que listas de preços/pdvCodes fiquem mascaradas por depth-limit
+    quando aparecem muito abaixo do objeto menu principal.
+    """
+    categorias = []
+    tamanhos = []
+    sabores = []
+
+    for i, obj in enumerate(data):
+        if not isinstance(obj, dict):
+            continue
+
+        keys = set(obj.keys())
+        nome = _resolver_campo(data, obj, "name", "")
+        main_category = _resolver_campo(data, obj, "mainCategory", "")
+        category_path = _resolver_campo(data, obj, "categoryPath", "")
+
+        if "productsPaths" in keys and str(main_category).lower() == "pizza":
+            categorias.append({
+                "index": i,
+                "id": _resolver_campo(data, obj, "id"),
+                "name": nome,
+                "calculateType": _resolver_campo(data, obj, "calculateType"),
+                "productsPaths": _resolver_campo(data, obj, "productsPaths", []),
+                "crusts": _resolver_campo(data, obj, "crusts", []),
+                "edges": _resolver_campo(data, obj, "edges", []),
+                "customs": _resolver_campo(data, obj, "customs", []),
+                "customsPaths": _resolver_campo(data, obj, "customsPaths", []),
+            })
+
+        if "numOfFlavors" in keys and "slices" in keys:
+            tamanhos.append({
+                "index": i,
+                "id": _resolver_campo(data, obj, "id"),
+                "name": nome,
+                "slug": _resolver_campo(data, obj, "slug"),
+                "slices": _resolver_campo(data, obj, "slices"),
+                "numOfFlavors": _resolver_campo(data, obj, "numOfFlavors", []),
+                "customs": _resolver_campo(data, obj, "customs", []),
+                "customsPaths": _resolver_campo(data, obj, "customsPaths", []),
+            })
+
+        if (
+            "prices" in keys
+            and isinstance(category_path, str)
+            and "/pizza-categories/" in category_path
+        ):
+            sabores.append({
+                "index": i,
+                "id": _resolver_campo(data, obj, "id"),
+                "name": nome,
+                "slug": _resolver_campo(data, obj, "slug"),
+                "active": _resolver_campo(data, obj, "active"),
+                "categoryPath": category_path,
+                "prices": _resolver_campo(data, obj, "prices", []),
+                "pdvCodes": _resolver_campo(data, obj, "pdvCodes", []),
+                "picture": _resolver_campo(data, obj, "picture", ""),
+                "description": _resolver_campo(data, obj, "description", ""),
+            })
+
+    return {
+        "categories": categorias,
+        "sizes": tamanhos,
+        "flavors": sabores,
+        "counts": {
+            "categories": len(categorias),
+            "sizes": len(tamanhos),
+            "flavors": len(sabores),
+        },
+    }
 
 
 def main():
@@ -134,9 +226,6 @@ def main():
             if len(pais) >= 120:
                 break
 
-    # Mapa adicional: entidades cujo estado resolvido contém caminhos de sabores,
-    # customizações ou os produtos de controle. Serve para provar o vínculo antes
-    # de qualquer alteração no parser de produção.
     entidades = []
     for i, value in enumerate(data):
         if not _entidade_interessante(value):
@@ -154,6 +243,8 @@ def main():
             if len(entidades) >= 160:
                 break
 
+    pizzas = _pizza_snapshot(data)
+
     payload = {
         "url": URL,
         "nuxt_type": type(data).__name__,
@@ -161,6 +252,7 @@ def main():
         "matches": matches[:160],
         "containers_referencing_matches": pais,
         "resolved_entities": entidades,
+        "pizza_snapshot": pizzas,
     }
     Path("artifacts").mkdir(exist_ok=True)
     Path("artifacts/brendi_nuxt.json").write_text(
@@ -171,6 +263,7 @@ def main():
         "matches": len(matches),
         "containers": len(pais),
         "resolved_entities": len(entidades),
+        "pizza_snapshot": pizzas["counts"],
     }, ensure_ascii=False))
     return 0
 
