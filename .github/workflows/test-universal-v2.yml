@@ -57,6 +57,7 @@ jobs:
           python -m py_compile debug_probe_urls.py
           python -m py_compile debug_network_map.py
           python -m py_compile debug_brendi_network.py
+          python -m py_compile debug_brendi_nuxt.py
           python -m py_compile universal_readiness.py
 
       - name: Testes offline V2
@@ -98,6 +99,10 @@ jobs:
         continue-on-error: true
         run: python debug_brendi_network.py
 
+      - name: Mapa Nuxt Brendi
+        continue-on-error: true
+        run: python debug_brendi_nuxt.py
+
       - name: Publicar probe antecipado
         if: always()
         uses: actions/upload-artifact@v4
@@ -107,6 +112,7 @@ jobs:
             artifacts/probe_endpoints.json
             artifacts/network_map.json
             artifacts/brendi_network.json
+            artifacts/brendi_nuxt.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -134,6 +140,7 @@ jobs:
             artifacts/probe_endpoints.json
             artifacts/network_map.json
             artifacts/brendi_network.json
+            artifacts/brendi_nuxt.json
             artifacts/readiness.json
           if-no-files-found: warn
           retention-days: 14
