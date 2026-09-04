@@ -28,7 +28,7 @@ CASOS_XLSX = [
     ("byFood", "https://pointdogosasco.byfood.com.br"),
     ("InstaDelivery", "https://instadelivery.com.br/acaidorafa1"),
     ("Brendi", "https://pedido.brendi.com.br/pizzaria-tortelli/"),
-    ("Ola Click", "https://happy-moments-2.ola.click/products"),
+    ("Ola Click", "https://la-petite-5.ola.click/products"),
     ("Saipos", "https://xisda15.saipos.com/home"),
     ("Cardapio Web", "https://app.cardapioweb.com/shakepoint_westplaza"),
 ]
