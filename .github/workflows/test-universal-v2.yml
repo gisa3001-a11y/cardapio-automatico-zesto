@@ -56,6 +56,7 @@ jobs:
           python -m py_compile real_xlsx_validation.py
           python -m py_compile debug_probe_urls.py
           python -m py_compile debug_network_map.py
+          python -m py_compile debug_brendi_network.py
           python -m py_compile universal_readiness.py
 
       - name: Testes offline V2
@@ -93,6 +94,10 @@ jobs:
         continue-on-error: true
         run: python debug_network_map.py
 
+      - name: Diagnostico estrutural Brendi
+        continue-on-error: true
+        run: python debug_brendi_network.py
+
       - name: Publicar probe antecipado
         if: always()
         uses: actions/upload-artifact@v4
@@ -101,6 +106,7 @@ jobs:
           path: |
             artifacts/probe_endpoints.json
             artifacts/network_map.json
+            artifacts/brendi_network.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -127,6 +133,7 @@ jobs:
             artifacts/real_xlsx_report.json
             artifacts/probe_endpoints.json
             artifacts/network_map.json
+            artifacts/brendi_network.json
             artifacts/readiness.json
           if-no-files-found: warn
           retention-days: 14
