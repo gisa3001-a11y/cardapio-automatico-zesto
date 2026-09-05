@@ -1,9 +1,10 @@
 """Enriquecimento conservador do Resultado Brendi usando o __NUXT_DATA__ comprovado.
 
-A rotina só associa sabores quando há correspondência exata de nome entre um
-Produto já lido pelo parser oficial e um tamanho ativo da categoria de pizza.
-Não cria produtos novos, não altera produtos sem correspondência e não usa
-heurística de categoria/nome aproximado.
+A rotina prioriza associação exata com produtos já lidos. Quando a própria fonte
+Nuxt declara inequivocamente uma categoria de pizza, um tamanho ativo e sabores
+com preço para aquele tamanho, mas o parser oficial não expõe esse tamanho como
+produto, a rotina pode materializar o tamanho como pizza. Não associa sabores a
+combos por aproximação de nome.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import re
 from bs4 import BeautifulSoup
 
 from brendi_nuxt_parser import extrair_pizzas_brendi_nuxt
-from models import GrupoOpcao
+from models import GrupoOpcao, Produto
 from utils import imagem_compativel, texto_seguro
 
 
@@ -33,6 +34,12 @@ def _preco_por_slug(flavor, size_slug):
     return None
 
 
+def _categoria_pizza_explicita(categoria):
+    principal = _norm(categoria.get("mainCategory"))
+    nome = _norm(categoria.get("name"))
+    return principal == "pizza" or nome.startswith("pizza") or nome.startswith("pizzas")
+
+
 def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
     """Liga sabores/tamanhos Brendi ao Resultado existente de forma fail-closed."""
     estrutura = extrair_pizzas_brendi_nuxt(nuxt_data)
@@ -45,6 +52,7 @@ def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
 
     grupos_existentes = {str(g.grupo_id) for g in (getattr(resultado, "grupos", []) or [])}
     vinculados = 0
+    criados = 0
     opcoes = 0
     tamanhos_ativos = []
     correspondencias = []
@@ -56,6 +64,7 @@ def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
             continue
 
         metodo = 3 if str(categoria.get("calculateType") or "").lower() == "max" else 1
+        categoria_pizza = _categoria_pizza_explicita(categoria)
         for tamanho in categoria.get("sizes") or []:
             if not isinstance(tamanho, dict) or tamanho.get("active") is False:
                 continue
@@ -76,8 +85,7 @@ def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
                 "candidatos_exatos": len(candidatos),
                 "nomes_candidatos": [str(getattr(p, "nome", "") or "") for p in candidatos],
             })
-            # Correspondência ambígua não é materializada.
-            if len(candidatos) != 1 or not slug_tamanho:
+            if len(candidatos) > 1 or not slug_tamanho or not nome_tamanho:
                 continue
 
             numeros = []
@@ -110,8 +118,26 @@ def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
             if not validos:
                 continue
 
+            produto = candidatos[0] if len(candidatos) == 1 else None
+            if produto is None:
+                # Só cria um tamanho ausente quando a fonte comprova explicitamente
+                # que se trata de pizza e possui sabores precificados para o slug.
+                if not categoria_pizza:
+                    continue
+                produto = Produto(
+                    codigo=f"brendi-size-{cat_id}-{slug_tamanho}",
+                    nome=texto_seguro(nome_tamanho),
+                    categoria=texto_seguro(categoria.get("name") or "Pizzas"),
+                    preco=0.0,
+                    pizza=True,
+                    metodo_preco_pizza=metodo,
+                )
+                resultado.pizzas.append(produto)
+                produtos.append(produto)
+                por_nome.setdefault(_norm(nome_tamanho), []).append(produto)
+                criados += 1
+
             gid = f"brendi-pizza-{cat_id}-{slug_tamanho}"
-            produto = candidatos[0]
             if gid not in produto.grupos:
                 produto.grupos.append(gid)
             produto.pizza = True
@@ -139,6 +165,7 @@ def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
         resultado.origem = (str(getattr(resultado, "origem", "") or "Brendi") + " + Nuxt pizzas").strip()
     auditoria = {
         "produtos_vinculados": vinculados,
+        "produtos_criados": criados,
         "opcoes_materializadas": opcoes,
         "produtos_lidos": [
             {
