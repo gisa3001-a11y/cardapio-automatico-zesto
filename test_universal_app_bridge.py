@@ -55,3 +55,36 @@ def test_usa_universal_quando_oficial_lancar_erro(monkeypatch):
     assert resultado is convertido
     assert fonte == "universal-v2"
     assert any("RuntimeError" in aviso for aviso in resultado.avisos)
+
+
+def test_brendi_enriquece_resultado_oficial_quando_vinculo_foi_comprovado(monkeypatch):
+    oficial = Resultado(itens=[Produto(codigo="1", nome="Combo", preco=50.0)])
+
+    def buscar(url, usar_playwright=True):
+        return oficial
+
+    monkeypatch.setattr(bridge, "_enriquecer_brendi_url", lambda resultado, url: True)
+    resultado, fonte = bridge.buscar_com_fallback_universal(
+        "https://pedido.brendi.com.br/loja/", buscar
+    )
+    assert resultado is oficial
+    assert fonte == "oficial+brendi-nuxt"
+    assert any("Pizzas Brendi enriquecidas" in aviso for aviso in resultado.avisos)
+
+
+def test_brendi_preserva_oficial_se_enriquecimento_falhar(monkeypatch):
+    oficial = Resultado(itens=[Produto(codigo="1", nome="Combo", preco=50.0)])
+
+    def buscar(url, usar_playwright=True):
+        return oficial
+
+    def falhar(*args, **kwargs):
+        raise RuntimeError("mudanca simulada na fonte")
+
+    monkeypatch.setattr(bridge, "_enriquecer_brendi_url", falhar)
+    resultado, fonte = bridge.buscar_com_fallback_universal(
+        "https://pedido.brendi.com.br/loja/", buscar
+    )
+    assert resultado is oficial
+    assert fonte == "oficial"
+    assert any("resultado oficial foi preservado" in aviso for aviso in resultado.avisos)
