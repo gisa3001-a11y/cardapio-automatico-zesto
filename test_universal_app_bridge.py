@@ -1,5 +1,6 @@
 from models import Produto, Resultado
 import universal_app_bridge as bridge
+from validator import validar
 
 
 def test_mantem_fluxo_oficial_quando_ha_produtos(monkeypatch):
@@ -21,7 +22,7 @@ def test_anota_move_vinho_falso_positivo_para_regular(monkeypatch):
     vinho = Produto(
         codigo="V1",
         nome="Vinho Villena 1L",
-        categoria="Bebidas",
+        categoria="Pizzas / Bebidas",
         preco=20.0,
         pizza=True,
         metodo_preco_pizza=0,
@@ -39,7 +40,13 @@ def test_anota_move_vinho_falso_positivo_para_regular(monkeypatch):
     assert resultado.itens == [vinho]
     assert vinho.pizza is False
     assert vinho.metodo_preco_pizza == 0
+    assert getattr(resultado, "_leitor_universal", {}).get("plataforma") == "Anota AI"
     assert any("reclassificado" in aviso for aviso in resultado.avisos)
+
+    erros, _ = validar(resultado)
+    assert erros == []
+    assert resultado.pizzas == []
+    assert resultado.itens == [vinho]
 
 
 def test_anota_nao_move_produto_que_realmente_menciona_pizza(monkeypatch):
