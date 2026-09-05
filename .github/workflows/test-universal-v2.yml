@@ -45,6 +45,7 @@ jobs:
           python -m py_compile saipos_public_probe.py
           python -m py_compile brendi_nuxt_parser.py
           python -m py_compile brendi_result_enrichment.py
+          python -m py_compile olaclick_variant_enrichment.py
           python -m py_compile price_resolution.py
           python -m py_compile pizza_rules.py
           python -m py_compile universal_validation.py
@@ -66,7 +67,7 @@ jobs:
           python -m py_compile universal_readiness.py
 
       - name: Testes offline V2
-        run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_platform_payload_adapters.py test_platform_specialized_probe.py test_rapidfood_public_probe.py test_saipos_public_probe.py test_brendi_nuxt_parser.py test_brendi_result_enrichment.py test_pizza_rules.py test_universal_price_validation.py test_validator_duplicate_option_function.py test_universal_readiness.py test_universal_export.py test_universal_integration.py test_universal_app_bridge.py test_universal_xlsx_e2e.py
+        run: pytest -q test_universal_router_v2.py tests/test_universal_router.py test_generic_preview_filters.py tests/test_generic_groups.py test_platform_payload_adapters.py test_platform_specialized_probe.py test_rapidfood_public_probe.py test_saipos_public_probe.py test_brendi_nuxt_parser.py test_brendi_result_enrichment.py test_olaclick_variant_enrichment.py test_pizza_rules.py test_universal_price_validation.py test_validator_duplicate_option_function.py test_universal_readiness.py test_universal_export.py test_universal_integration.py test_universal_app_bridge.py test_universal_xlsx_e2e.py
 
       - name: Smoke test Streamlit
         run: |
@@ -177,6 +178,7 @@ jobs:
           assert Path('saipos_public_probe.py').exists()
           assert Path('brendi_nuxt_parser.py').exists()
           assert Path('brendi_result_enrichment.py').exists()
+          assert Path('olaclick_variant_enrichment.py').exists()
           assert Path('real_quality_guard.py').exists()
           assert Path('debug_brendi_match.py').exists()
           assert Path('debug_olaclick_nuxt.py').exists()
