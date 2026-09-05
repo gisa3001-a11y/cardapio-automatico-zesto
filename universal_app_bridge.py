@@ -7,6 +7,7 @@ bateria real de XLSX. Ola Click preserva o parser oficial e materializa somente
 variantes nomeadas comprovadas pelo estado Nuxt público; variantes únicas sem nome
 continuam sendo tratadas apenas como preço normal do produto.
 """
+import re
 from typing import Callable, Tuple
 
 import requests
@@ -19,10 +20,16 @@ from olaclick_variant_enrichment import (
 from models import Resultado
 from preview_runner import gerar_previa_universal
 from universal_integration import converter_previa_para_resultado
+from utils import parece_pizza
 
 
 def _tem_produtos(resultado: Resultado) -> bool:
     return bool(resultado and (resultado.itens or resultado.pizzas))
+
+
+def _eh_anota(url: str) -> bool:
+    u = (url or "").lower()
+    return "anota.ai" in u or "anotaai" in u
 
 
 def _eh_rapidfood(url: str) -> bool:
@@ -35,6 +42,32 @@ def _eh_brendi(url: str) -> bool:
 
 def _eh_olaclick(url: str) -> bool:
     return "ola.click" in (url or "").lower()
+
+
+def _sanear_vinhos_anota(resultado: Resultado) -> int:
+    """Move apenas falsos positivos de vinho para itens regulares.
+
+    A bateria real mostrou vinhos comuns dentro de ``resultado.pizzas`` sem qualquer
+    evidência de pizza no próprio nome. A correção replica o critério conservador já
+    documentado no validator: o item precisa conter a palavra vinho e o nome, sozinho,
+    não pode indicar pizza. Nenhum outro produto é reclassificado.
+    """
+    manter_pizzas = []
+    mover_itens = []
+    for produto in resultado.pizzas:
+        nome = str(getattr(produto, "nome", "") or "")
+        categoria = str(getattr(produto, "categoria", "") or "")
+        eh_vinho = bool(re.search(r"\bvinho(?:s)?\b", f"{nome} {categoria}", re.IGNORECASE))
+        if eh_vinho and not parece_pizza(nome, "", ""):
+            produto.pizza = False
+            produto.metodo_preco_pizza = 0
+            mover_itens.append(produto)
+        else:
+            manter_pizzas.append(produto)
+    if mover_itens:
+        resultado.pizzas = manter_pizzas
+        resultado.itens.extend(mover_itens)
+    return len(mover_itens)
 
 
 def _http_html(url: str) -> str:
@@ -93,6 +126,14 @@ def buscar_com_fallback_universal(
     try:
         atual = buscar_oficial(url, usar_playwright=usar_playwright)
         if _tem_produtos(atual):
+            if _eh_anota(url):
+                corrigidos = _sanear_vinhos_anota(atual)
+                if corrigidos:
+                    atual.avisos.insert(
+                        0,
+                        f"Anota AI: {corrigidos} vinho(s) reclassificado(s) como item regular após falso positivo de pizza comprovado na bateria real.",
+                    )
+
             if _eh_brendi(url):
                 try:
                     if _enriquecer_brendi_url(atual, url):
