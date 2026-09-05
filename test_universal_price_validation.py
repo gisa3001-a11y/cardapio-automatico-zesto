@@ -1,4 +1,4 @@
-from models import Produto, Resultado
+from models import GrupoOpcao, Produto, Resultado
 from price_resolution import aplicar_resolucao_precos
 from universal_validation import validar_previa
 from validator import validar
@@ -151,3 +151,42 @@ def test_validator_nao_desfaz_pastel_saneado_do_ola_click():
     assert [p.nome for p in resultado.itens] == ["Pastel"]
     assert resultado.pizzas == []
     assert resultado.itens[0].pizza is False
+
+
+def test_validator_nao_alerta_preco_zero_quando_grupo_vinculado_define_preco():
+    pizza = Produto(
+        codigo="pizza-brendi",
+        nome="Grande - 8 Fatias",
+        categoria="Pizzas Grandes",
+        preco=0.0,
+        grupos=["sabores"],
+        pizza=True,
+        metodo_preco_pizza=3,
+    )
+    sabor = GrupoOpcao(
+        grupo_id="sabores",
+        tipo=2,
+        grupo_nome="Sabores",
+        nome="3 Queijos",
+        preco=54.0,
+        minimo=1,
+        maximo=2,
+        repetir=0,
+        metodo_preco=3,
+    )
+    resultado = Resultado(itens=[], pizzas=[pizza], grupos=[sabor], origem="Brendi + Nuxt pizzas")
+
+    erros, avisos = validar(resultado)
+
+    assert erros == []
+    assert not any('Preço zero em "Grande - 8 Fatias"' in aviso for aviso in avisos)
+
+
+def test_validator_mantem_alerta_preco_zero_sem_estrutura_precificada():
+    item = Produto(codigo="zero", nome="Produto Zero", categoria="Teste", preco=0.0)
+    resultado = Resultado(itens=[item], pizzas=[], grupos=[], origem="Teste")
+
+    erros, avisos = validar(resultado)
+
+    assert erros == []
+    assert any('Preço zero em "Produto Zero"' in aviso for aviso in avisos)
