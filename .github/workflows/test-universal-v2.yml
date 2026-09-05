@@ -61,6 +61,7 @@ jobs:
           python -m py_compile debug_probe_urls.py
           python -m py_compile debug_network_map.py
           python -m py_compile debug_rapidfood_modal.py
+          python -m py_compile debug_instadelivery_quality.py
           python -m py_compile debug_brendi_network.py
           python -m py_compile debug_brendi_nuxt.py
           python -m py_compile debug_brendi_match.py
@@ -106,6 +107,10 @@ jobs:
         continue-on-error: true
         run: python debug_rapidfood_modal.py
 
+      - name: Auditoria de qualidade InstaDelivery
+        continue-on-error: true
+        run: python debug_instadelivery_quality.py
+
       - name: Diagnostico estrutural Brendi
         continue-on-error: true
         run: python debug_brendi_network.py
@@ -131,6 +136,7 @@ jobs:
             artifacts/probe_endpoints.json
             artifacts/network_map.json
             artifacts/rapidfood_modal.json
+            artifacts/instadelivery_quality.json
             artifacts/brendi_network.json
             artifacts/brendi_nuxt.json
             artifacts/brendi_match.json
@@ -166,6 +172,7 @@ jobs:
             artifacts/probe_endpoints.json
             artifacts/network_map.json
             artifacts/rapidfood_modal.json
+            artifacts/instadelivery_quality.json
             artifacts/brendi_network.json
             artifacts/brendi_nuxt.json
             artifacts/brendi_match.json
@@ -188,6 +195,7 @@ jobs:
           assert Path('olaclick_variant_enrichment.py').exists()
           assert Path('real_quality_guard.py').exists()
           assert Path('debug_rapidfood_modal.py').exists()
+          assert Path('debug_instadelivery_quality.py').exists()
           assert Path('debug_brendi_match.py').exists()
           assert Path('debug_olaclick_nuxt.py').exists()
           assert Path('universal_integration.py').exists()
