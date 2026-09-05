@@ -209,12 +209,22 @@ def validar(resultado: Resultado):
         if total_prod and not resultado.grupos:
             avisos.append("FINAL: nenhum adicional foi encontrado; a plataforma pode exigir parser/API específico.")
 
-    # Preços
+    # Preços. Base zero só é pendência quando não existe preço estrutural comprovado
+    # nos grupos vinculados. Isso evita falso alerta em pizzas como a Brendi, cujo
+    # valor final é calculado pelos sabores (método de preço já definido).
+    grupos_com_preco_positivo={
+        str(g.grupo_id)
+        for g in resultado.grupos
+        if float(getattr(g, "preco", 0) or 0) > 0
+    }
     for p in resultado.itens+resultado.pizzas:
         if p.preco < 0:
             erros.append(f'Preço negativo em "{p.nome}".')
         if p.preco == 0:
-            avisos.append(f'Preço zero em "{p.nome}".')
+            gids={str(gid) for gid in (p.grupos or [])}
+            preco_estruturado=bool(gids & grupos_com_preco_positivo)
+            if not preco_estruturado:
+                avisos.append(f'Preço zero em "{p.nome}".')
 
     if not resultado.itens and not resultado.pizzas:
         erros.append("Nenhum produto foi reconhecido.")
