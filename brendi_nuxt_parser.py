@@ -58,6 +58,8 @@ def extrair_pizzas_brendi_nuxt(data):
     Cada sabor mantém ``prices`` resolvido; os registros observados em produção
     usam objetos como ``{"price": 5400, "slug": "grande-8-fatias"}``.
     O vínculo categoria -> sabores é feito pelo ID presente em ``categoryPath``.
+    A lista ``sizes`` de cada categoria também é preservada, pois ela é a fonte
+    comprovada do vínculo categoria -> tamanho -> limite de sabores.
     """
     if not isinstance(data, list):
         raise ValueError("Brendi: __NUXT_DATA__ inesperado; era esperada uma lista.")
@@ -80,6 +82,7 @@ def extrair_pizzas_brendi_nuxt(data):
                 "name": name,
                 "calculateType": _campo(data, obj, "calculateType"),
                 "productsPaths": _campo(data, obj, "productsPaths", []),
+                "sizes": _campo(data, obj, "sizes", []),
                 "crusts": _campo(data, obj, "crusts", []),
                 "edges": _campo(data, obj, "edges", []),
                 "customs": _campo(data, obj, "customs", []),
@@ -91,6 +94,7 @@ def extrair_pizzas_brendi_nuxt(data):
                 "id": _campo(data, obj, "id"),
                 "name": name,
                 "slug": _campo(data, obj, "slug"),
+                "active": _campo(data, obj, "active"),
                 "slices": _campo(data, obj, "slices"),
                 "numOfFlavors": _campo(data, obj, "numOfFlavors", []),
             })
