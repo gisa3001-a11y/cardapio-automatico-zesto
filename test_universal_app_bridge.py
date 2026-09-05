@@ -17,6 +17,55 @@ def test_mantem_fluxo_oficial_quando_ha_produtos(monkeypatch):
     assert fonte == "oficial"
 
 
+def test_anota_move_vinho_falso_positivo_para_regular(monkeypatch):
+    vinho = Produto(
+        codigo="V1",
+        nome="Vinho Villena 1L",
+        categoria="Bebidas",
+        preco=20.0,
+        pizza=True,
+        metodo_preco_pizza=0,
+    )
+    oficial = Resultado(pizzas=[vinho])
+
+    def buscar(url, usar_playwright=True):
+        return oficial
+
+    resultado, fonte = bridge.buscar_com_fallback_universal(
+        "https://app.anota.ai/m/teste", buscar
+    )
+    assert fonte == "oficial"
+    assert resultado.pizzas == []
+    assert resultado.itens == [vinho]
+    assert vinho.pizza is False
+    assert vinho.metodo_preco_pizza == 0
+    assert any("reclassificado" in aviso for aviso in resultado.avisos)
+
+
+def test_anota_nao_move_produto_que_realmente_menciona_pizza(monkeypatch):
+    produto = Produto(
+        codigo="P1",
+        nome="Pizza com Vinho",
+        categoria="Pizzas",
+        preco=45.0,
+        pizza=True,
+        metodo_preco_pizza=3,
+    )
+    oficial = Resultado(pizzas=[produto])
+
+    def buscar(url, usar_playwright=True):
+        return oficial
+
+    resultado, fonte = bridge.buscar_com_fallback_universal(
+        "https://app.anota.ai/m/teste", buscar
+    )
+    assert fonte == "oficial"
+    assert resultado.pizzas == [produto]
+    assert resultado.itens == []
+    assert produto.pizza is True
+    assert produto.metodo_preco_pizza == 3
+
+
 def test_usa_universal_somente_quando_oficial_zerar(monkeypatch):
     convertido = Resultado(itens=[Produto(codigo="U1", nome="Produto universal", preco=20.0)])
     previa = object()
