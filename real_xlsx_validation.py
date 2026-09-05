@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 from openpyxl import Workbook, load_workbook
+import requests
 
+from brendi_result_enrichment import extrair_nuxt_data_html, enriquecer_resultado_brendi_nuxt
 from preview_runner import gerar_previa_universal
 from universal_integration import converter_previa_para_resultado
 from universal_router import detectar_url, ler_url_universal
@@ -75,6 +77,32 @@ def _resultado_por_url(url: str):
     return resultado, "fallback-generico", erro_oficial
 
 
+def _enriquecer_brendi_real(resultado, url: str) -> Dict[str, Any]:
+    """Exercita a correção Brendi em ambiente de validação, sem alterar o app.
+
+    A leitura é fail-closed: qualquer mudança na página pública ou no Nuxt faz a
+    bateria falhar, em vez de inventar sabores, vínculos ou preços.
+    """
+    resposta = requests.get(
+        url,
+        timeout=25,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+            )
+        },
+    )
+    resposta.raise_for_status()
+    nuxt_data = extrair_nuxt_data_html(resposta.text)
+    _, auditoria = enriquecer_resultado_brendi_nuxt(resultado, nuxt_data)
+    if int(auditoria.get("produtos_vinculados") or 0) < 1:
+        raise ValueError("Brendi: enriquecimento real não vinculou nenhum produto de pizza.")
+    if int(auditoria.get("opcoes_materializadas") or 0) < 1:
+        raise ValueError("Brendi: enriquecimento real não materializou sabores.")
+    return auditoria
+
+
 def _inspecionar_xlsx(xlsx: bytes) -> Dict[str, Any]:
     wb = load_workbook(BytesIO(xlsx), data_only=False)
     formulas = 0
@@ -119,6 +147,10 @@ def validar_caso_xlsx(label: str, url: str) -> Dict[str, Any]:
         if resultado is None:
             item.update({"status": "sem-produtos", "xlsx_gerado": False})
             return item
+
+        if label == "Brendi":
+            item["enriquecimento_brendi"] = _enriquecer_brendi_real(resultado, url)
+            item["caminho_leitura"] = caminho + "+nuxt-pizzas-validacao"
 
         produtos = list(resultado.itens or []) + list(resultado.pizzas or [])
         item.update({
