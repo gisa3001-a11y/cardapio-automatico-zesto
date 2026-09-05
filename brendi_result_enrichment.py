@@ -46,6 +46,8 @@ def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
     grupos_existentes = {str(g.grupo_id) for g in (getattr(resultado, "grupos", []) or [])}
     vinculados = 0
     opcoes = 0
+    tamanhos_ativos = []
+    correspondencias = []
 
     for categoria in estrutura.get("categories") or []:
         cat_id = str(categoria.get("id") or "")
@@ -59,7 +61,21 @@ def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
                 continue
             nome_tamanho = str(tamanho.get("name") or "").strip()
             slug_tamanho = str(tamanho.get("slug") or "").strip()
+            if nome_tamanho:
+                tamanhos_ativos.append({
+                    "categoria": str(categoria.get("name") or ""),
+                    "categoria_id": cat_id,
+                    "nome": nome_tamanho,
+                    "slug": slug_tamanho,
+                })
             candidatos = por_nome.get(_norm(nome_tamanho)) or []
+            correspondencias.append({
+                "categoria": str(categoria.get("name") or ""),
+                "tamanho": nome_tamanho,
+                "slug": slug_tamanho,
+                "candidatos_exatos": len(candidatos),
+                "nomes_candidatos": [str(getattr(p, "nome", "") or "") for p in candidatos],
+            })
             # Correspondência ambígua não é materializada.
             if len(candidatos) != 1 or not slug_tamanho:
                 continue
@@ -121,7 +137,21 @@ def enriquecer_resultado_brendi_nuxt(resultado, nuxt_data):
 
     if vinculados:
         resultado.origem = (str(getattr(resultado, "origem", "") or "Brendi") + " + Nuxt pizzas").strip()
-    return resultado, {"produtos_vinculados": vinculados, "opcoes_materializadas": opcoes}
+    auditoria = {
+        "produtos_vinculados": vinculados,
+        "opcoes_materializadas": opcoes,
+        "produtos_lidos": [
+            {
+                "nome": str(getattr(p, "nome", "") or ""),
+                "categoria": str(getattr(p, "categoria", "") or ""),
+                "pizza": bool(getattr(p, "pizza", False)),
+            }
+            for p in produtos
+        ],
+        "tamanhos_ativos": tamanhos_ativos,
+        "correspondencias": correspondencias,
+    }
+    return resultado, auditoria
 
 
 def extrair_nuxt_data_html(html):
