@@ -51,6 +51,9 @@ def _sanear_vinhos_anota(resultado: Resultado) -> int:
     evidência de pizza no próprio nome. A correção replica o critério conservador já
     documentado no validator: o item precisa conter a palavra vinho e o nome, sozinho,
     não pode indicar pizza. Nenhum outro produto é reclassificado.
+
+    O marcador privado impede apenas que o validator desfaça esta mesma decisão
+    comprovada; categoria, descrição e demais dados de origem permanecem intactos.
     """
     manter_pizzas = []
     mover_itens = []
@@ -61,6 +64,7 @@ def _sanear_vinhos_anota(resultado: Resultado) -> int:
         if eh_vinho and not parece_pizza(nome, "", ""):
             produto.pizza = False
             produto.metodo_preco_pizza = 0
+            produto._regular_saneado_universal = "anota-vinho"
             mover_itens.append(produto)
         else:
             manter_pizzas.append(produto)
@@ -129,6 +133,10 @@ def buscar_com_fallback_universal(
             if _eh_anota(url):
                 corrigidos = _sanear_vinhos_anota(atual)
                 if corrigidos:
+                    atual._leitor_universal = {
+                        "plataforma": "Anota AI",
+                        "saneamentos": ["vinho-falso-pizza"],
+                    }
                     atual.avisos.insert(
                         0,
                         f"Anota AI: {corrigidos} vinho(s) reclassificado(s) como item regular após falso positivo de pizza comprovado na bateria real.",
