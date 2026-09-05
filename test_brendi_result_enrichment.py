@@ -51,6 +51,11 @@ def _nuxt_fixture():
     return data
 
 
+def _assert_audit_counts(audit, vinculados, opcoes):
+    assert audit["produtos_vinculados"] == vinculados
+    assert audit["opcoes_materializadas"] == opcoes
+
+
 def test_enriquece_apenas_produto_com_tamanho_exato():
     alvo = Produto(codigo="1", nome="Grande - 8 Fatias", categoria="Pizzas Grandes", preco=45.0)
     outro = Produto(codigo="2", nome="Bebida", categoria="Bebidas", preco=8.0)
@@ -58,7 +63,7 @@ def test_enriquece_apenas_produto_com_tamanho_exato():
 
     resultado, audit = enriquecer_resultado_brendi_nuxt(resultado, _nuxt_fixture())
 
-    assert audit == {"produtos_vinculados": 1, "opcoes_materializadas": 1}
+    _assert_audit_counts(audit, 1, 1)
     assert alvo.pizza is True
     assert alvo.metodo_preco_pizza == 3
     assert alvo.grupos == ["brendi-pizza-cat-grande-grande-8-fatias"]
@@ -76,7 +81,7 @@ def test_enriquece_apenas_produto_com_tamanho_exato():
 def test_nao_associa_quando_nome_do_tamanho_nao_bate_exatamente():
     resultado = Resultado(itens=[Produto(codigo="1", nome="Pizza Grande", categoria="Pizzas")], origem="Brendi")
     resultado, audit = enriquecer_resultado_brendi_nuxt(resultado, _nuxt_fixture())
-    assert audit == {"produtos_vinculados": 0, "opcoes_materializadas": 0}
+    _assert_audit_counts(audit, 0, 0)
     assert resultado.grupos == []
     assert resultado.itens[0].grupos == []
 
@@ -87,5 +92,5 @@ def test_nao_materializa_correspondencia_ambigua():
         Produto(codigo="2", nome="Grande - 8 Fatias"),
     ], origem="Brendi")
     resultado, audit = enriquecer_resultado_brendi_nuxt(resultado, _nuxt_fixture())
-    assert audit == {"produtos_vinculados": 0, "opcoes_materializadas": 0}
+    _assert_audit_counts(audit, 0, 0)
     assert resultado.grupos == []
