@@ -60,6 +60,7 @@ jobs:
           python -m py_compile real_quality_guard.py
           python -m py_compile debug_probe_urls.py
           python -m py_compile debug_network_map.py
+          python -m py_compile debug_rapidfood_modal.py
           python -m py_compile debug_brendi_network.py
           python -m py_compile debug_brendi_nuxt.py
           python -m py_compile debug_brendi_match.py
@@ -101,6 +102,10 @@ jobs:
         continue-on-error: true
         run: python debug_network_map.py
 
+      - name: Diagnostico de modais RapidFood
+        continue-on-error: true
+        run: python debug_rapidfood_modal.py
+
       - name: Diagnostico estrutural Brendi
         continue-on-error: true
         run: python debug_brendi_network.py
@@ -125,6 +130,7 @@ jobs:
           path: |
             artifacts/probe_endpoints.json
             artifacts/network_map.json
+            artifacts/rapidfood_modal.json
             artifacts/brendi_network.json
             artifacts/brendi_nuxt.json
             artifacts/brendi_match.json
@@ -159,6 +165,7 @@ jobs:
             artifacts/real_xlsx_report.json
             artifacts/probe_endpoints.json
             artifacts/network_map.json
+            artifacts/rapidfood_modal.json
             artifacts/brendi_network.json
             artifacts/brendi_nuxt.json
             artifacts/brendi_match.json
@@ -180,6 +187,7 @@ jobs:
           assert Path('brendi_result_enrichment.py').exists()
           assert Path('olaclick_variant_enrichment.py').exists()
           assert Path('real_quality_guard.py').exists()
+          assert Path('debug_rapidfood_modal.py').exists()
           assert Path('debug_brendi_match.py').exists()
           assert Path('debug_olaclick_nuxt.py').exists()
           assert Path('universal_integration.py').exists()
