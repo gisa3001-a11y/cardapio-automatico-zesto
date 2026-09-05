@@ -1,10 +1,10 @@
 """Validação controlada de XLSX com dados reais do Leitor Universal V2.
 
 Este script não altera o app nem publica arquivos de cardápio. Para cada plataforma
-prioritária, ele reutiliza o mesmo caminho de leitura (parser oficial quando possível,
-fallback universal quando necessário), valida o Resultado e gera um XLSX em memória
-sobre um template mínimo estrutural. O XLSX é reaberto para confirmar integridade e
-é inspecionado contra fórmulas e hyperlinks.
+prioritária, ele reutiliza exatamente o mesmo bridge de leitura usado pelo app,
+valida o Resultado e gera um XLSX em memória sobre um template mínimo estrutural.
+O XLSX é reaberto para confirmar integridade e é inspecionado contra fórmulas e
+hyperlinks.
 """
 from __future__ import annotations
 
@@ -14,12 +14,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 from openpyxl import Workbook, load_workbook
-import requests
 
-from brendi_result_enrichment import extrair_nuxt_data_html, enriquecer_resultado_brendi_nuxt
-from preview_runner import gerar_previa_universal
-from universal_integration import converter_previa_para_resultado
-from universal_router import detectar_url, ler_url_universal
+from fetchers import buscar_por_url
+from universal_app_bridge import buscar_com_fallback_universal
 from validator import validar
 from xlsx_writer import gerar_xlsx
 
@@ -36,11 +33,12 @@ CASOS_XLSX = [
 ]
 
 # Guardas estruturais só entram quando há evidência pública inequívoca na própria
-# fonte real usada pela bateria. A loja Brendi de controle expõe pizzas que exigem
-# escolha de sabores; portanto, zero grupos/opções é perda estrutural e não pode
-# ser contabilizado como XLSX saudável apenas porque o arquivo abre corretamente.
+# fonte real usada pela bateria. A Brendi de controle expõe pizzas com sabores e a
+# Ola Click de controle possui produtos com duas variantes nomeadas selecionáveis.
+# Assim, zero grupos/opções nesses casos é perda estrutural mesmo que o XLSX abra.
 MINIMOS_ESTRUTURAIS = {
     "Brendi": {"opcoes": 1, "produtos_com_grupo": 1},
+    "Ola Click": {"opcoes": 2, "produtos_com_grupo": 1},
 }
 
 
@@ -59,48 +57,15 @@ def _template_minimo() -> bytes:
 
 
 def _resultado_por_url(url: str):
-    det = detectar_url(url)
-    erro_oficial = None
-
-    if det.estrategia != "diagnostico":
-        try:
-            resultado, _ = ler_url_universal(det.url_normalizada, usar_playwright=True)
-            if resultado is not None and (resultado.itens or resultado.pizzas):
-                return resultado, "parser-oficial", erro_oficial
-        except Exception as exc:
-            erro_oficial = f"{type(exc).__name__}: {exc}"
-
-    previa = gerar_previa_universal(det.url_normalizada)
-    if not (previa.produtos or []):
-        return None, "fallback-generico", erro_oficial
-    resultado = converter_previa_para_resultado(previa, exigir_aprovacao=True)
-    return resultado, "fallback-generico", erro_oficial
-
-
-def _enriquecer_brendi_real(resultado, url: str) -> Dict[str, Any]:
-    """Exercita a correção Brendi em ambiente de validação, sem alterar o app.
-
-    A leitura é fail-closed: qualquer mudança na página pública ou no Nuxt faz a
-    bateria falhar, em vez de inventar sabores, vínculos ou preços.
-    """
-    resposta = requests.get(
+    """Usa o mesmo caminho de leitura chamado pelo Streamlit de produção."""
+    resultado, caminho = buscar_com_fallback_universal(
         url,
-        timeout=25,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
-            )
-        },
+        buscar_por_url,
+        usar_playwright=True,
     )
-    resposta.raise_for_status()
-    nuxt_data = extrair_nuxt_data_html(resposta.text)
-    _, auditoria = enriquecer_resultado_brendi_nuxt(resultado, nuxt_data)
-    if int(auditoria.get("produtos_vinculados") or 0) < 1:
-        raise ValueError("Brendi: enriquecimento real não vinculou nenhum produto de pizza.")
-    if int(auditoria.get("opcoes_materializadas") or 0) < 1:
-        raise ValueError("Brendi: enriquecimento real não materializou sabores.")
-    return auditoria
+    if resultado is None or not (resultado.itens or resultado.pizzas):
+        return None, caminho, None
+    return resultado, caminho, None
 
 
 def _inspecionar_xlsx(xlsx: bytes) -> Dict[str, Any]:
@@ -147,10 +112,6 @@ def validar_caso_xlsx(label: str, url: str) -> Dict[str, Any]:
         if resultado is None:
             item.update({"status": "sem-produtos", "xlsx_gerado": False})
             return item
-
-        if label == "Brendi":
-            item["enriquecimento_brendi"] = _enriquecer_brendi_real(resultado, url)
-            item["caminho_leitura"] = caminho + "+nuxt-pizzas-validacao"
 
         produtos = list(resultado.itens or []) + list(resultado.pizzas or [])
         item.update({
@@ -217,7 +178,8 @@ def main() -> int:
         resultados.append(r)
         print(
             f"[XLSX real] {label}: {r.get('status')} / "
-            f"{r.get('produtos', 0)} produto(s) / {r.get('opcoes', 0)} opção(ões)",
+            f"{r.get('produtos', 0)} produto(s) / {r.get('opcoes', 0)} opção(ões) / "
+            f"motor={r.get('caminho_leitura', 'n/a')}",
             flush=True,
         )
 
