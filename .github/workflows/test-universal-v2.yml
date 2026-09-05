@@ -67,6 +67,7 @@ jobs:
           python -m py_compile debug_brendi_match.py
           python -m py_compile debug_olaclick_nuxt.py
           python -m py_compile debug_olaclick_quality.py
+          python -m py_compile debug_saipos_quality.py
           python -m py_compile universal_readiness.py
 
       - name: Testes offline V2
@@ -132,6 +133,10 @@ jobs:
         continue-on-error: true
         run: python debug_olaclick_quality.py
 
+      - name: Auditoria de qualidade Saipos
+        continue-on-error: true
+        run: python debug_saipos_quality.py
+
       - name: Publicar probe antecipado
         if: always()
         uses: actions/upload-artifact@v4
@@ -147,6 +152,7 @@ jobs:
             artifacts/brendi_match.json
             artifacts/olaclick_nuxt.json
             artifacts/olaclick_quality.json
+            artifacts/saipos_quality.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -184,6 +190,7 @@ jobs:
             artifacts/brendi_match.json
             artifacts/olaclick_nuxt.json
             artifacts/olaclick_quality.json
+            artifacts/saipos_quality.json
             artifacts/readiness.json
           if-no-files-found: warn
           retention-days: 14
@@ -206,6 +213,7 @@ jobs:
           assert Path('debug_brendi_match.py').exists()
           assert Path('debug_olaclick_nuxt.py').exists()
           assert Path('debug_olaclick_quality.py').exists()
+          assert Path('debug_saipos_quality.py').exists()
           assert Path('universal_integration.py').exists()
           assert Path('universal_app_bridge.py').exists()
           assert Path('real_xlsx_validation.py').exists()
