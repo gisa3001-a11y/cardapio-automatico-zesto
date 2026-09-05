@@ -3,14 +3,19 @@
 Preserva os parsers oficiais e usa o universal como fallback quando necessário.
 RapidFood prioriza o V2 por causa do 403 observado no Streamlit Cloud. Brendi
 mantém o parser oficial e recebe apenas o enriquecimento Nuxt já comprovado pela
-bateria real de XLSX; se a fonte mudar, o enriquecimento falha fechado e o
-resultado oficial é preservado sem inventar vínculos.
+bateria real de XLSX. Ola Click preserva o parser oficial e materializa somente
+variantes nomeadas comprovadas pelo estado Nuxt público; variantes únicas sem nome
+continuam sendo tratadas apenas como preço normal do produto.
 """
 from typing import Callable, Tuple
 
 import requests
 
 from brendi_result_enrichment import extrair_nuxt_data_html, enriquecer_resultado_brendi_nuxt
+from olaclick_variant_enrichment import (
+    extrair_nuxt_data_html as extrair_nuxt_data_olaclick,
+    enriquecer_resultado_olaclick_variantes,
+)
 from models import Resultado
 from preview_runner import gerar_previa_universal
 from universal_integration import converter_previa_para_resultado
@@ -28,7 +33,11 @@ def _eh_brendi(url: str) -> bool:
     return "pedido.brendi.com.br" in (url or "").lower()
 
 
-def _enriquecer_brendi_url(resultado: Resultado, url: str) -> bool:
+def _eh_olaclick(url: str) -> bool:
+    return "ola.click" in (url or "").lower()
+
+
+def _http_html(url: str) -> str:
     resposta = requests.get(
         url,
         timeout=25,
@@ -40,11 +49,24 @@ def _enriquecer_brendi_url(resultado: Resultado, url: str) -> bool:
         },
     )
     resposta.raise_for_status()
-    nuxt_data = extrair_nuxt_data_html(resposta.text)
+    return resposta.text
+
+
+def _enriquecer_brendi_url(resultado: Resultado, url: str) -> bool:
+    nuxt_data = extrair_nuxt_data_html(_http_html(url))
     _, auditoria = enriquecer_resultado_brendi_nuxt(resultado, nuxt_data)
     return (
         int(auditoria.get("produtos_vinculados") or 0) >= 1
         and int(auditoria.get("opcoes_materializadas") or 0) >= 1
+    )
+
+
+def _enriquecer_olaclick_url(resultado: Resultado, url: str) -> bool:
+    nuxt_data = extrair_nuxt_data_olaclick(_http_html(url))
+    _, auditoria = enriquecer_resultado_olaclick_variantes(resultado, nuxt_data)
+    return (
+        int(auditoria.get("produtos_vinculados") or 0) >= 1
+        and int(auditoria.get("opcoes_materializadas") or 0) >= 2
     )
 
 
@@ -86,6 +108,23 @@ def buscar_com_fallback_universal(
                     atual.avisos.append(
                         f"Brendi: enriquecimento Nuxt indisponível ({type(exc).__name__}); o resultado oficial foi preservado."
                     )
+
+            if _eh_olaclick(url):
+                try:
+                    if _enriquecer_olaclick_url(atual, url):
+                        atual.avisos.insert(
+                            0,
+                            "Variantes Ola Click enriquecidas pelo estado Nuxt público validado, com vínculo por ID e preço final preservado por delta.",
+                        )
+                        return atual, "oficial+olaclick-nuxt"
+                    atual.avisos.append(
+                        "Ola Click: nenhuma escolha de variantes nomeadas suficientemente comprovada foi encontrada; o resultado oficial foi preservado."
+                    )
+                except Exception as exc:
+                    atual.avisos.append(
+                        f"Ola Click: enriquecimento de variantes indisponível ({type(exc).__name__}); o resultado oficial foi preservado."
+                    )
+
             return atual, "oficial"
     except Exception as exc:
         erro_oficial = exc
