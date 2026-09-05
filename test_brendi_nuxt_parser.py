@@ -9,6 +9,7 @@ def test_extrai_categoria_tamanho_sabor_e_preco_por_slug():
         "mainCategory": 3,
         "productsPaths": [4],
         "calculateType": 5,
+        "sizes": [6],
     }
     data[1] = "cat-grande"
     data[2] = "Pizzas Grandes"
@@ -21,6 +22,7 @@ def test_extrai_categoria_tamanho_sabor_e_preco_por_slug():
         "slug": 8,
         "slices": 9,
         "numOfFlavors": [10, 11],
+        "active": 16,
     }
     data[7] = "Grande - 8 Fatias"
     data[8] = "grande-8-fatias"
@@ -55,9 +57,12 @@ def test_extrai_categoria_tamanho_sabor_e_preco_por_slug():
     assert len(out["categories"]) == 1
     assert out["categories"][0]["id"] == "cat-grande"
     assert out["categories"][0]["calculateType"] == "max"
+    assert out["categories"][0]["sizes"][0]["slug"] == "grande-8-fatias"
+    assert out["categories"][0]["sizes"][0]["numOfFlavors"] == [1, 2]
 
     assert len(out["sizes"]) == 1
     assert out["sizes"][0]["slug"] == "grande-8-fatias"
+    assert out["sizes"][0]["active"] is True
     assert out["sizes"][0]["slices"] == 8
     assert out["sizes"][0]["numOfFlavors"] == [1, 2]
 
