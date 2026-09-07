@@ -1,12 +1,12 @@
 """Executa a previa generica do Leitor Universal V2.
 
-Fluxo: tenta JSON publico por HTTP; para excecoes conhecidas pode usar um probe
-HTTP especifico, API publica, probe especializado e, se ainda necessario,
-Playwright generico. Payloads conhecidos passam por adaptadores estruturais
-antes da normalizacao. Depois resolve preco zero, aplica pizza e valida.
-Nao gera XLSX automaticamente.
+Fluxo: tenta primeiro o parser canonico do Anota AI quando o dominio e conhecido;
+para os demais casos tenta JSON publico por HTTP, probe especifico, API publica,
+probe especializado e, se ainda necessario, Playwright generico. Payloads conhecidos
+passam por adaptadores estruturais antes da normalizacao. Depois resolve preco zero,
+aplica pizza e valida. Nao gera XLSX automaticamente.
 """
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -59,6 +59,84 @@ def _vazio(url: str, status: Optional[int], fonte: str, aviso: str = "", erro: O
         produtos=[], grupos=[], pizzas=[], diagnosticos_precos=[],
         validacao={"aprovado": False, "score": 0, "erros": [aviso] if aviso else [], "avisos": [], "metricas": {}, "pode_gerar_xlsx": False},
         total_candidatos=0, avisos=[aviso] if aviso else [], erro=erro,
+    )
+
+
+def _eh_anota_ai(url: str) -> bool:
+    low = (url or "").lower()
+    return "anota.ai" in low or "anotaai" in low
+
+
+def _preparar_previa_anota_canonica(url: str) -> ResultadoPreviaUniversal:
+    """Usa a estrutura oficial do Anota AI antes da heuristica universal.
+
+    O payload do Anota possui ``menu`` (produtos) e ``menu_aux`` (opcoes). Quando a
+    heuristica generica avalia um fragmento isolado de ``menu_aux``, sabores como
+    Laranja/Limao podem parecer produtos independentes e receber codigo sintetico
+    U-*. O parser canonico conhece o vinculo ``next_steps -> menu_aux`` e evita essa
+    promocao incorreta.
+    """
+    from fetchers import buscar_anota_ai
+
+    resultado = buscar_anota_ai(url)
+    objetos_produtos = list(resultado.itens or []) + list(resultado.pizzas or [])
+    if not objetos_produtos:
+        raise ValueError("Anota AI: o parser canonico nao retornou produtos.")
+
+    grupos = [asdict(g) for g in (resultado.grupos or [])]
+    produtos_brutos = [asdict(p) for p in objetos_produtos]
+    produtos, diagnosticos_precos = aplicar_resolucao_precos(produtos_brutos, grupos)
+
+    # Mantem a classificacao canonica de pizza do parser Anota. Quando o metodo do
+    # produto ainda estiver indefinido, aceita somente um metodo explicito e unico
+    # dos grupos vinculados (1/2/3); nao inventa regra quando houver divergencia.
+    por_codigo = {str(p.get("codigo") or ""): p for p in produtos}
+    grupos_por_id: Dict[str, List[Dict[str, Any]]] = {}
+    for g in grupos:
+        grupos_por_id.setdefault(str(g.get("grupo_id") or ""), []).append(g)
+
+    pizzas = []
+    for original in (resultado.pizzas or []):
+        codigo = str(getattr(original, "codigo", "") or "")
+        p = dict(por_codigo.get(codigo) or asdict(original))
+        p["pizza"] = True
+        if int(p.get("metodo_preco_pizza", 0) or 0) == 0:
+            metodos = set()
+            for gid in p.get("grupos") or []:
+                for g in grupos_por_id.get(str(gid), []):
+                    metodo = int(g.get("metodo_preco", 0) or 0)
+                    if metodo in (1, 2, 3):
+                        metodos.add(metodo)
+            if len(metodos) == 1:
+                p["metodo_preco_pizza"] = next(iter(metodos))
+                if codigo in por_codigo:
+                    por_codigo[codigo]["metodo_preco_pizza"] = p["metodo_preco_pizza"]
+        pizzas.append(p)
+
+    validacao = validar_previa(produtos, grupos, pizzas, "alta").to_dict()
+    avisos = list(resultado.avisos or [])
+    avisos.insert(0, "Anota AI lido pelo parser canonico antes da heuristica universal; opcoes de menu_aux nao sao promovidas a produtos.")
+    resolvidos = sum(1 for d in diagnosticos_precos if d.get("resolvido"))
+    if resolvidos:
+        avisos.append(f"{resolvidos} produto(s) com preco zero tiveram preco resolvido por grupo estruturado do Anota AI.")
+    for aviso in validacao.get("avisos") or []:
+        if aviso not in avisos:
+            avisos.append(str(aviso))
+    if validacao.get("erros"):
+        avisos.append("Previa Anota AI ainda nao elegivel para exportacao: " + "; ".join(validacao["erros"][:4]))
+
+    return ResultadoPreviaUniversal(
+        url_final=url,
+        status_http=200,
+        fonte="anota-ai:parser-canonico",
+        confianca="alta",
+        produtos=produtos,
+        grupos=grupos,
+        pizzas=pizzas,
+        diagnosticos_precos=diagnosticos_precos,
+        validacao=validacao,
+        total_candidatos=len(produtos),
+        avisos=avisos,
     )
 
 
@@ -131,6 +209,16 @@ def _probe_browser(url: str, timeout: int):
 
 
 def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool = True) -> ResultadoPreviaUniversal:
+    # Anota AI possui parser estrutural comprovado. Ele precisa vir antes da
+    # heuristica generica, porque menu_aux contem opcoes com nome/preco que podem
+    # parecer produtos independentes quando avaliadas fora do contexto.
+    anota_aviso = ""
+    if _eh_anota_ai(url):
+        try:
+            return _preparar_previa_anota_canonica(url)
+        except Exception as exc:
+            anota_aviso = f"Parser canonico Anota AI indisponivel ({type(exc).__name__}: {exc}); usando fallback universal."
+
     status = None
     url_final = url
     melhor = None
@@ -191,7 +279,7 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
         if permitir_browser:
             aviso += " nem pelos fallbacks especializados/genericos de navegador"
         aviso += "."
-        extras = [x for x in (http_aviso, http_especifico_aviso, api_aviso, especial_aviso, browser_aviso) if x]
+        extras = [x for x in (anota_aviso, http_aviso, http_especifico_aviso, api_aviso, especial_aviso, browser_aviso) if x]
         if extras:
             aviso += " " + " ".join(extras)
         return _vazio(url_final, status, melhor_fonte or ("erro" if http_aviso else "nenhuma"), aviso)
@@ -203,6 +291,8 @@ def gerar_previa_universal(url: str, timeout: int = 25, permitir_browser: bool =
     pizzas = [d for d in diagnosticos_pizza if d.get("pizza")]
 
     avisos = list(data["avisos"])
+    if anota_aviso:
+        avisos.append(anota_aviso)
     if http_aviso:
         avisos.append(http_aviso)
     if melhor_fonte.startswith("specialized:"):
