@@ -39,6 +39,7 @@ CASOS = [
     ("MeuComercio", "https://meucomercio.com.br/AdegaOriom"),
     ("BigD", "https://recantodochurrasco1.bigd.im"),
     ("Loja.Menu", "https://loja.menu/bombuque"),
+    ("ClicaPedidos - Do Bem PizzaBeer", "https://dobempizzabeer.clicapedidos.com.br/"),
     ("Dominio proprio", "http://www.lapizzaiola.com.br"),
 ]
 
