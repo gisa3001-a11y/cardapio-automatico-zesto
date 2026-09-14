@@ -40,6 +40,7 @@ CASOS = [
     ("BigD", "https://recantodochurrasco1.bigd.im"),
     ("Loja.Menu", "https://loja.menu/bombuque"),
     ("ClicaPedidos - Do Bem PizzaBeer", "https://dobempizzabeer.clicapedidos.com.br/"),
+    ("Yooga - La Celeste Pizzas", "https://delivery.yooga.app/la-celeste-pizzas/tabs/home"),
     ("Dominio proprio", "http://www.lapizzaiola.com.br"),
 ]
 
