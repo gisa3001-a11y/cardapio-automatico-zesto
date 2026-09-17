@@ -41,6 +41,7 @@ CASOS = [
     ("Loja.Menu", "https://loja.menu/bombuque"),
     ("ClicaPedidos - Do Bem PizzaBeer", "https://dobempizzabeer.clicapedidos.com.br/"),
     ("Yooga - La Celeste Pizzas", "https://delivery.yooga.app/la-celeste-pizzas/tabs/home"),
+    ("Yooga - Pizzaria Laurita", "https://delivery.yooga.app/pizzaria-laurita/tabs/home"),
     ("Dominio proprio", "http://www.lapizzaiola.com.br"),
 ]
 
