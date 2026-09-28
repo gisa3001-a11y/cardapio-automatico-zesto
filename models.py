@@ -7,6 +7,7 @@ class GrupoOpcao:
     tipo: int
     grupo_nome: str
     nome: str
+    descricao: str = ""
     imagem: str = ""
     preco: float = 0.0
     minimo: int = 0
