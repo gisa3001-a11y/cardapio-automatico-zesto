@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 from openpyxl import load_workbook
 
 ITEM_HEADERS = 21
-GRUPO_HEADERS = 10
+GRUPO_HEADERS = 12
 PIZZA_HEADERS = 20
 
 
@@ -180,6 +180,8 @@ def gerar_xlsx(template_bytes, resultado):
             int(g.maximo or 0),
             int(g.repetir or 0),
             int(g.metodo_preco or 1),
+            "",  # Código PDV
+            getattr(g, "descricao", "") or "",
         ]
         for c, v in enumerate(vals, start=1):
             wg.cell(idx, c).value = v
