@@ -34,6 +34,7 @@ CASOS = [
     ("EntregueJa", "https://vemdeburger.entregueja.com.br/home"),
     ("Saipos", "https://xisda15.saipos.com/home"),
     ("Anota AI", "https://app.anota.ai/m/xPELP5xiw"),
+    ("Anota AI - Hamburgueria Mineira 3", "https://pedido.anota.ai/loja/hamburgueria-mineira-3"),
     ("ECTA", "https://www.ecta.com.br/PizzariaMaisvoce?w=1"),
     ("PedidoSite", "https://gordolancheshamburgueria.pedidosite.com.br/?loja=9919"),
     ("MeuComercio", "https://meucomercio.com.br/AdegaOriom"),
